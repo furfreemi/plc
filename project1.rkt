@@ -43,11 +43,16 @@
 
 
 
+
+
 ;eventually: take in entire tree, empty state: break up & call other functions
 (define evalParseTree
   (lambda (tree state)
     (cond
-      ((eq? (car state) 'FINISH) (cadr state))
+      ((eq? (car state) 'FINISH) (cond
+                                   ((eq? #f (cadr state)) 'false)
+                                   ((eq? #t (cadr state)) 'true)
+                                   (else (cadr state))))
       (else (evalParseTree (cdr tree) (M_state (car tree) state)))
     )
   )
@@ -109,8 +114,8 @@
   (lambda (exp state)
     (cond
       ((eq? (operand exp) 'var) (add (cdr exp) state))
-      ((eq? (operand exp) '=) (if (initialized (operand exp) (vars state))
-                                  (add (cons (cadr exp) (cons (M_value (caddr exp) state)'())) (removevar (cadr exp) state))
+      ((eq? (operand exp) '=) (if (initialized (cadr exp) (vars state))
+                                  (add (cons (cadr exp) (cons (op2 exp state)'())) (removevar (cadr exp) state))
                                   (error 'unknown "variable not yet declared"))) 
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
                                    (M_state (stmt1 exp) state)
@@ -129,12 +134,16 @@
   )
 
 
+
 ;takes in expression and attempts to evaluate its value    
 (define M_value
   (lambda (exp state)
     (cond
       ((number? exp) exp)
       ((boolean? exp) exp)
+      ((eq? exp 'true) #t)
+      ((eq? exp 'false) #f)
+      ((bool? exp) (M_boolean exp state))
       ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
                              (error 'unknown "var unknown")  ;unknown variable: error
                              (lookup exp state))) ;if var value exists in state, return value
@@ -169,5 +178,22 @@
       )
     )
   )
+
+
+(define bool?
+  (lambda (exp)
+    (if (pair? exp)
+        (or (or (or (or (or (or (or
+        (or (eq? (operand exp) '!=)
+        (eq? (operand exp) '==))
+        (eq? (operand exp) '>))
+        (eq? (operand exp) '<))
+        (eq? (operand exp) '<=))
+        (eq? (operand exp) '>=))
+        (eq? (operand exp) '&&))
+        (eq? (operand exp) '||))
+        (eq? (operand exp) '!))
+        #f)))
+        
 
 
