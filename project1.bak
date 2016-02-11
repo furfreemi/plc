@@ -1,11 +1,10 @@
-;Larissa Marcich, Dina Benayad-Cherif, Adam Gleichsner
-;lmm154, dxb448, amg188
+;Larissa Marcich, Dina Benayad-Cherif
 ;Project 1: EECS 345
 
 
 (load "simpleParser.scm")
 
-;required interpret method
+
 (define interpret
   (lambda (filename)
     (evalParseTree (parser filename) new_state)
@@ -13,23 +12,9 @@
   )
 
 
-
-
-;base abstractions 
 (define new_state '(() ()))
-
-(define vars car)
-(define vals cadr)
-(define firstvar caar)
-(define firstval caadr)
-
-(define condition cadr)
-(define stmt1 caddr)
-(define stmt2 cadddr)
-      
 (define operand car)
 
-;operator definitions handle variable lookup
 (define op1
   (lambda (exp state)
     (M_value (cadr exp) state)))
@@ -39,36 +24,31 @@
     (M_value (caddr exp) state)))
 
 
-
-
-
-
-;eventually: take in entire tree, empty state: break up & call other functions
 (define evalParseTree
   (lambda (tree state)
     (cond
-      ((eq? (car state) 'FINISH) (cadr state))
-      (else (evalParseTree (cdr tree) (M_state (car tree) state)))
+      ((number? tree) tree)
+      ((eq? 'var (operator tree)) 0 )
+      ((eq? '= (operator tree)) 0)
+      (else 0)
+      )
     )
   )
-  )
 
-
-
-; add new variable and value (or initialize to error) to state, return new state
+;op1: cadr
+;op2: caddr
 (define add
   (lambda (exp state)
     (cond
-      ((eq? (length exp) 1) (append (cons (cons (car exp) (vars state)) '()) (cons (cons 'error (cadr state)) '())))
-      ((eq? (length exp) 2) (append (cons (cons (car exp) (vars state)) '()) (cons (cons (op1 exp state) (cadr state)) '())))
+      ((eq? (length exp) 1) (append (cons (cons (car exp) (car state)) '()) (cons (cons 'error (cadr state)) '())))
+      ((eq? (length exp) 2) (append (cons (cons (car exp) (car state)) '()) (cons (cons (op1 exp state) (cadr state)) '())))
       (else (error 'unknown "unknown expression"))
       )
     )
   )
 
 
-; get value of a variable from state: returns 'error if undefined
-(define lookup 
+(define lookup
   (lambda (exp state)
     (cond
       ((null? (car state)) 'error)
@@ -79,8 +59,6 @@
   )
 
 
-; remove variable and its value from state, return new state
-; if variable not present just returns existing state
 (define removevar
   (lambda (exp state)
     (cond
@@ -91,13 +69,17 @@
     )
   )
 
+(define vars car)
+(define vals cadr)
+(define firstvar caar)
+(define firstval caadr)
+      
 
-;Mstate: takes in expression, passes to Mbool or Mval as necessary to evaluate
 (define M_state
   (lambda (exp state)
     (cond
       ((eq? (operand exp) 'var) (add (cdr exp) state))
-      ((eq? (operand exp) '=) (add (cons (cadr exp) (cons (M_value (caddr exp) state)'())) (removevar (cadr exp) state))) ;FIX: removes before adds
+      ((eq? (operand exp) '=) (add (cdr exp) (removevar (cadr exp) state)))
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
                                    (M_state (stmt1 exp) state)
                                    (if (eq? (length exp) 4)
@@ -109,35 +91,35 @@
                                       state
                                       )
                                   )
-      ((eq? (operand exp) 'return) (cons 'FINISH (cons (M_value (cdr exp) state) '())))
+      ((eq? (operand exp) 'return) (M_value (cdr exp) state))
       )
     )
   )
 
 
-;takes in expression and attempts to evaluate its value    
+(define condition cadr)
+(define stmt1 caddr)
+(define stmt2 cadddr)
+    
 (define M_value
   (lambda (exp state)
     (cond
       ((number? exp) exp)
       ((boolean? exp) exp)
-      ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
-                             (error 'unknown "var unknown")  ;unknown variable: error
-                             (lookup exp state))) ;if var value exists in state, return value
+      ((not (pair? exp)) (if (eq? (lookup exp state) 'error)(error 'unknown "variable undeclared")  ;unknown variable: error
+                         (lookup exp state))) ;if var value exists in state, return value
       ((eq? (operand exp) '+) (+ (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '-) (if (eq? (length exp) 3)
-                                  (- (op1 exp state) (op2 exp state))
-                                  (- 0 (op1 exp state))))
+      ((eq? (operand exp) '-) (- (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '*) (* (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '/) (quotient (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '%) (remainder (op1 exp state) (op2 exp state)))
-      ((pair? exp) (M_value (car exp) state))
-      (else (error 'unknown exp)) 
+      ((pair? (operand exp)) (M_value (car exp) state))
+      (else (error 'unknown "unknown expression")) 
       )
     )
   )
 
-; evaluates boolean expressions
+
 (define M_boolean
   (lambda (exp state)
     (cond
