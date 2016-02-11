@@ -78,6 +78,18 @@
     )
   )
 
+;checks if state contains a variable (if variable has been initialized yet)
+(define initialized
+  (lambda (var? varlist)
+    (cond
+      ((null? varlist) #f)
+      ((eq? (car varlist) var?) #t)
+      (else (initialized var? (cdr varlist)))
+      )
+    )
+  )
+    
+
 
 ; remove variable and its value from state, return new state
 ; if variable not present just returns existing state
@@ -97,7 +109,9 @@
   (lambda (exp state)
     (cond
       ((eq? (operand exp) 'var) (add (cdr exp) state))
-      ((eq? (operand exp) '=) (add (cons (cadr exp) (cons (M_value (caddr exp) state)'())) (removevar (cadr exp) state))) ;FIX: removes before adds
+      ((eq? (operand exp) '=) (if (initialized (operand exp) (vars state))
+                                  (add (cons (cadr exp) (cons (M_value (caddr exp) state)'())) (removevar (cadr exp) state))
+                                  (error 'unknown "variable not yet declared"))) 
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
                                    (M_state (stmt1 exp) state)
                                    (if (eq? (length exp) 4)
