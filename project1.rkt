@@ -83,6 +83,7 @@
 (define add
   (lambda (exp state)
     (cond
+      ((initialized (varname exp) (vars state)) (error 'unknown "redefining already declared variable"))
       ((eq? (length exp) 1) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons 'error (vals state)) '())))
       ((eq? (length exp) 2) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons (op1 exp state) (vals state)) '())))
       (else (error 'unknown "unknown expression"))
