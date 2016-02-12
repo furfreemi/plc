@@ -14,19 +14,25 @@
 
 
 
-
 ;base abstractions 
 (define new_state '(() ()))
+(define returnval cadr)
+
+(define first_exp car)
+(define remaining_exp cdr)
 
 (define vars car)
 (define vals cadr)
 (define firstvar caar)
 (define firstval caadr)
+(define remaining_vars cdar)
+(define remaining_vals cdadr)
 
 (define condition cadr)
 (define stmt1 caddr)
 (define stmt2 cadddr)
-      
+
+(define varname car)
 (define operand car)
 
 ;operator definitions handle variable lookup
@@ -41,22 +47,35 @@
 
 
 
-
-
-
-
-;eventually: take in entire tree, empty state: break up & call other functions
+;take in entire tree, empty state: break up & call other functions
 (define evalParseTree
   (lambda (tree state)
     (cond
       ((eq? (car state) 'FINISH) (cond
-                                   ((eq? #f (cadr state)) 'false)
-                                   ((eq? #t (cadr state)) 'true)
-                                   (else (cadr state))))
-      (else (evalParseTree (cdr tree) (M_state (car tree) state)))
+                                   ((eq? #f (returnval state)) 'false)
+                                   ((eq? #t (returnval state)) 'true)
+                                   (else (returnval state))))
+      (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state)))
     )
   )
   )
+
+
+;helper: is this a boolean expression?
+(define bool?
+  (lambda (exp)
+    (if (pair? exp)
+        (or (or (or (or (or (or (or (or
+            (eq? (operand exp) '!=)
+            (eq? (operand exp) '==))
+            (eq? (operand exp) '>))
+            (eq? (operand exp) '<))
+            (eq? (operand exp) '<=))
+            (eq? (operand exp) '>=))
+            (eq? (operand exp) '&&))
+            (eq? (operand exp) '||))
+            (eq? (operand exp) '!))
+        #f)))
 
 
 
@@ -64,8 +83,8 @@
 (define add
   (lambda (exp state)
     (cond
-      ((eq? (length exp) 1) (append (cons (cons (car exp) (vars state)) '()) (cons (cons 'error (cadr state)) '())))
-      ((eq? (length exp) 2) (append (cons (cons (car exp) (vars state)) '()) (cons (cons (op1 exp state) (cadr state)) '())))
+      ((eq? (length exp) 1) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons 'error (vals state)) '())))
+      ((eq? (length exp) 2) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons (op1 exp state) (vals state)) '())))
       (else (error 'unknown "unknown expression"))
       )
     )
@@ -76,9 +95,9 @@
 (define lookup 
   (lambda (exp state)
     (cond
-      ((null? (car state)) 'error)
-      ((eq? (caar state) exp) (caadr state))
-      (else (lookup exp (cons (cdar state) (cons (cdadr state) '()))))
+      ((null? (vars state)) 'error)
+      ((eq? (firstvar state) exp) (firstval state))
+      (else (lookup exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))
       )
     )
   )
@@ -102,8 +121,8 @@
   (lambda (exp state)
     (cond
       ((null? (vars state)) state)
-      ((eq? exp (firstvar state)) (cons (cdar state) (cons (cdadr state) '())))
-      (else (cons (cons (firstvar state) (vars (removevar exp (cons (cdar state) (cons (cdadr state) '()))))) (cons (cons (firstval state) (vals (removevar exp (cons (cdar state) (cons (cdadr state) '()))))) '())))
+      ((eq? exp (firstvar state)) (cons (remaining_vars state) (cons (remaining_vals state) '())))
+      (else (cons (cons (firstvar state) (vars (removevar exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))) (cons (cons (firstval state) (vals (removevar exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))) '())))
       )
     )
   )
@@ -113,7 +132,7 @@
 (define M_state
   (lambda (exp state)
     (cond
-      ((eq? (operand exp) 'var) (add (cdr exp) state))
+      ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
       ((eq? (operand exp) '=) (if (initialized (cadr exp) (vars state))
                                   (add (cons (cadr exp) (cons (op2 exp state)'())) (removevar (cadr exp) state))
                                   (error 'unknown "variable not yet declared"))) 
@@ -128,7 +147,7 @@
                                       state
                                       )
                                   )
-      ((eq? (operand exp) 'return) (cons 'FINISH (cons (M_value (cdr exp) state) '())))
+      ((eq? (operand exp) 'return) (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))
       )
     )
   )
@@ -180,20 +199,6 @@
   )
 
 
-(define bool?
-  (lambda (exp)
-    (if (pair? exp)
-        (or (or (or (or (or (or (or
-        (or (eq? (operand exp) '!=)
-        (eq? (operand exp) '==))
-        (eq? (operand exp) '>))
-        (eq? (operand exp) '<))
-        (eq? (operand exp) '<=))
-        (eq? (operand exp) '>=))
-        (eq? (operand exp) '&&))
-        (eq? (operand exp) '||))
-        (eq? (operand exp) '!))
-        #f)))
         
 
 
