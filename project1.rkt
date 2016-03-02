@@ -1,7 +1,6 @@
 ;Larissa Marcich, Dina Benayad-Cherif, Adam Gleichsner
 ;lmm154, dxb448, amg188
-;Project 1: EECS 345
-
+;Project 2: EECS 345
 
 (load "simpleParser.scm")
 
@@ -11,8 +10,6 @@
     (evalParseTree (parser filename) new_state)
     )
   )
-
-
 
 ;base abstractions 
 (define new_state '((() ())))
@@ -51,12 +48,11 @@
 
 
 
-
 ;take in entire tree, empty state: break up & call other functions
 (define evalParseTree
   (lambda (tree state)
     (cond
-      ((null? tree) state) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+      ;((null? tree) state) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ((eq? (car state) 'FINISH) (cond
                                    ((eq? #f (returnval state)) 'false)
                                    ((eq? #t (returnval state)) 'true)
@@ -97,12 +93,25 @@
 (define add
   (lambda (exp state)
     (cond
-      ((initialized (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
+      ((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
       ((eq? (length exp) 1) ; var not immediately initialized: add in with 'error inital value
            (addtotop (varname exp) 'error state))
       ((eq? (length exp) 2) ; add in var with initalized value
            (addtotop (varname exp) (op1 exp state) state))
       (else (error 'unknown "unknown expression"))
+      )
+    )
+  )
+
+; update var's value within its layer
+(define update
+  (lambda (var val state)
+    (cond
+      ((null? state) state)
+      ((null? (toplayer_vars state)) (pushlayer (update var val (lower_layers state))))
+      ((eq? (lookup var state) 'UNDECLARED) state)
+      ((eq? var (first_topvar state)) (build_modified_state (cons var (remaining_topvars state)) (cons val (remaining_topvals state)) (lower_layers state)))
+      (else (addtotop (first_topvar state) (first_topval state) (update var val (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))))
       )
     )
   )
@@ -159,7 +168,7 @@
 (define declared?
   (lambda (exp state)
     (cond
-      ((eq? (lookup exp state) 'UNDECLARED) #f)    ;simply uninitialized
+      ((eq? (lookup exp state) 'UNDECLARED) #f)    ;not even declared
       (else #t)
       )
     )
@@ -187,8 +196,8 @@
   (lambda (exp state)
     (cond
       ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
-      ((eq? (operand exp) '=) (if (initialized (cadr exp) state)
-                                  (add (cons (cadr exp) (cons (op2 exp state)'())) (removevar (cadr exp) state))
+      ((eq? (operand exp) '=) (if (declared? (cadr exp) state)
+                                  (update (cadr exp) (op2 exp state) state)
                                   (error 'unknown "variable not yet declared"))) 
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
                                    (M_state (stmt1 exp) state)
@@ -196,6 +205,7 @@
                                        (M_state (stmt2 exp) state)
                                        state))
                                )
+      ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (pushlayer state)))
       ((eq? (operand exp) 'while) (if (M_boolean (condition exp) state)
                                       (M_state exp (M_state (stmt1 exp) state))
                                       state
@@ -205,8 +215,15 @@
       )
     )
   )
+  
 
-
+; begin helper method
+(define begin_helper
+  (lambda (exp state)
+    (cond
+     ((null? exp) (poplayer state))
+     (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state)))))) 
+     
 
 ;takes in expression and attempts to evaluate its value    
 (define M_value
@@ -218,8 +235,10 @@
       ((eq? exp 'false) #f)
       ((bool? exp) (M_boolean exp state))
       ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
-                             (error 'unknown "var unknown")  ;unknown variable: error
-                             (lookup exp state))) ;if var value exists in state, return value
+                             (error 'unknown "variable not yet initialized")  ;unknown variable: error
+                             (if (eq? (lookup exp state) 'UNDECLARED)
+                                 (error 'unknown "variable not yet declared")
+                                 (lookup exp state)))) ;if var value exists in state, return value
       ((eq? (operand exp) '+) (+ (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '-) (if (eq? (length exp) 3)
                                   (- (op1 exp state) (op2 exp state))
