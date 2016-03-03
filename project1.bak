@@ -211,7 +211,7 @@
     (cond
       ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
       ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (cons '(() ()) state) break continue))
-      ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state) 'UNDECLARED)))
+      ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (declared? (op2 exp state) state))
                                   (change_value (cadr exp) (op2 exp state) state)
                                   (error 'unknown "variable not yet declared")))
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
@@ -231,12 +231,8 @@
                                       state2
                                       )
                                   ))) (loop exp state)))))
-      ((eq? (operand exp) 'break) (if (eq? break 'error)
-                                      (error 'unknown "cannot execute break outside of block")
-                                      (break (stripstate state))))
-      ((eq? (operand exp) 'continue) (if (eq? continue 'error)
-                                      (error 'unknown "cannot execute continue outside of block")
-                                      (continue (stripstate state))))
+      ((eq? (operand exp) 'break) (break (stripstate state)))
+      ((eq? (operand exp) 'continue) (continue (stripstate state)))
       ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state))))))) (M_stateloop exp state break continue))))))
 
 
