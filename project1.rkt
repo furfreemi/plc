@@ -15,18 +15,23 @@
 
 
 ;base abstractions 
-(define new_state '(() ()))
+(define new_state '((() ())))
+(define new_layer '(()()))
 (define returnval cadr)
 
 (define first_exp car)
 (define remaining_exp cdr)
 
-(define vars car)
-(define vals cadr)
-(define firstvar caar)
-(define firstval caadr)
-(define remaining_vars cdar)
-(define remaining_vals cdadr)
+;updated layer state abstractions
+(define toplayer_vars caar)
+(define toplayer_vals cadar)
+
+; add var and val to top layer of state
+(define addtotop
+  (lambda (var val state)
+    (cons (cons (cons var (toplayer_vars state)) (cons (cons val (toplayer_vals state)) '())) (cdr state))
+    ))
+
 
 (define condition cadr)
 (define stmt1 caddr)
@@ -51,11 +56,12 @@
 (define evalParseTree
   (lambda (tree state)
     (cond
+      ((null? tree) state) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
       ((eq? (car state) 'FINISH) (cond
                                    ((eq? #f (returnval state)) 'false)
                                    ((eq? #t (returnval state)) 'true)
                                    (else (returnval state))))
-      (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state)))
+      (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state 'error 'error)))
     )
   )
   )
@@ -77,39 +83,84 @@
             (eq? (operand exp) '!))
         #f)))
 
+; add new empty layer to state
+(define pushlayer
+  (lambda (state)
+    (cons new_layer state)))
 
+; remove top layer from state
+(define poplayer
+  (lambda (state)
+    (cdr state)))
 
-; add new variable and value (or initialize to error) to state, return new state
+; add new variable and value (or initialize to error) to top layer of state, return new state
 (define add
   (lambda (exp state)
     (cond
-      ((initialized (varname exp) (vars state)) (error 'unknown "redefining already declared variable"))
-      ((eq? (length exp) 1) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons 'error (vals state)) '())))
-      ((eq? (length exp) 2) (append (cons (cons (varname exp) (vars state)) '()) (cons (cons (op1 exp state) (vals state)) '())))
+      ((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
+      ((eq? (length exp) 1) ; var not immediately initialized: add in with 'error inital value
+           (addtotop (varname exp) 'error state))
+      ((eq? (length exp) 2) ; add in var with initalized value
+           (addtotop (varname exp) (op1 exp state) state))
       (else (error 'unknown "unknown expression"))
       )
     )
   )
+
+; very first variable in top layer of state
+(define first_topvar (lambda (state) (car (toplayer_vars state))))
+
+; very first value in top layer of state
+(define first_topval (lambda (state) (car (toplayer_vals state))))
+
+; state sans the very first variable in the very top layer
+(define remaining_topvars
+  (lambda (state)
+    (cdr (toplayer_vars state))))     
+
+; state sans the very first value in the very top layer
+(define remaining_topvals
+  (lambda (state)
+    (cdr (toplayer_vals state))))
+
+; remove top layer from state
+(define lower_layers cdr)
+
+; creates a new state version with topvars and topvals making up the first layer, state making up the rest of the lower layers
+(define build_modified_state
+  (lambda (topvars topvals state)
+    (cons (cons topvars (cons topvals '())) state)))
 
 
 ; get value of a variable from state: returns 'error if undefined
 (define lookup 
   (lambda (exp state)
     (cond
-      ((null? (vars state)) 'error)
-      ((eq? (firstvar state) exp) (firstval state))
-      (else (lookup exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))
+      ((null? state) 'UNDECLARED)  ;PREVIOUSLY RETURNED 'error: MAKE SURE ALL DEPENDENCIES ARE UPDATED
+      ((null? (toplayer_vars state)) (lookup exp (cdr state)))
+      ((eq? (first_topvar state) exp) (first_topval state))
+      (else (lookup exp (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state))))
       )
     )
   )
 
-;checks if state contains a variable (if variable has been initialized yet)
-(define initialized
-  (lambda (var? varlist)
+;checks if state contains a variable (if variable has been initialized yet) ;PREVIOUSLY TOOK VARLIST: make sure all uses are updated to input entire state
+(define initialized?
+  (lambda (exp state)
     (cond
-      ((null? varlist) #f)
-      ((eq? (car varlist) var?) #t)
-      (else (initialized var? (cdr varlist)))
+      ((eq? (lookup exp state) 'UNDECLARED) #f) ;not even declared yet
+      ((eq? (lookup exp state) 'error) #f)    ;simply uninitialized
+      (else #t)
+      )
+    )
+  )
+
+;checks to see if variable has been declared yet
+(define declared?
+  (lambda (exp state)
+    (cond
+      ((eq? (lookup exp state) 'UNDECLARED) #f)    ;simply uninitialized
+      (else #t)
       )
     )
   )
@@ -121,33 +172,64 @@
 (define removevar
   (lambda (exp state)
     (cond
-      ((null? (vars state)) state)
-      ((eq? exp (firstvar state)) (cons (remaining_vars state) (cons (remaining_vals state) '())))
-      (else (cons (cons (firstvar state) (vars (removevar exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))) (cons (cons (firstval state) (vals (removevar exp (cons (remaining_vars state) (cons (remaining_vals state) '()))))) '())))
+      ((null? state) state)
+      ((null? (toplayer_vars state)) (pushlayer (removevar exp (lower_layers state))))
+      ((eq? (lookup exp state) 'UNDECLARED) state)
+      ((eq? exp (first_topvar state)) (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
+      (else (addtotop (first_topvar state) (first_topval state) (removevar exp (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))))
       )
     )
   )
 
+(define stripstate
+  (lambda (state)
+    (cdr state)))
+
+(define change_value
+  (lambda (exp value state)
+    (cond
+      ((null? state) state)
+      ((null? (toplayer_vars state)) (pushlayer (change_value exp value (lower_layers state))))
+      ;((eq? (lookup exp state) 'UNDECLARED) state)
+      ((eq? exp (first_topvar state)) (build_modified_state (toplayer_vars state) (cons value (remaining_topvals state)) (lower_layers state)))
+      (else (addtotop (first_topvar state) (first_topval state) (change_value exp value (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
+                      )))))
+
+(define begin_helper
+  (lambda (exp state break continue)
+    (cond
+      ((null? exp) (poplayer state))
+      (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue) break continue)))))
+
 
 ;Mstate: takes in expression, passes to Mbool or Mval as necessary to evaluate
 (define M_state
-  (lambda (exp state)
+  (lambda (exp state break continue)
     (cond
       ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
-      ((eq? (operand exp) '=) (if (initialized (cadr exp) (vars state))
-                                  (add (cons (cadr exp) (cons (op2 exp state)'())) (removevar (cadr exp) state))
-                                  (error 'unknown "variable not yet declared"))) 
+      ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (cons '(() ()) state) break continue))
+      ((eq? (operand exp) '=) (if (declared? (cadr exp) state)
+                                  (change_value (cadr exp) (op2 exp state) state)
+                                  (error 'unknown "variable not yet declared")))
       ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
-                                   (M_state (stmt1 exp) state)
+                                   (M_state (stmt1 exp) state break continue)
                                    (if (eq? (length exp) 4)
-                                       (M_state (stmt2 exp) state)
-                                       state))
+                                       (M_state (stmt2 exp) state break continue)
+                                        state))
                                )
-      ((eq? (operand exp) 'while) (if (M_boolean (condition exp) state)
-                                      (M_state exp (M_state (stmt1 exp) state))
-                                      state
+      ((eq? (operand exp) 'while) (call/cc
+                                   (lambda (break)
+                                   (letrec ((loop (lambda (exp2 state2)  
+                                   (if (M_boolean (condition exp2) state2)
+                                      (loop exp2
+                                       (call/cc
+                                        (lambda (continue)
+                                       (M_state (stmt1 exp2) state2 break continue))))
+                                      state2
                                       )
-                                  )
+                                  ))) (loop exp state)))))
+      ((eq? (operand exp) 'break) (break state))
+      ((eq? (operand exp) 'continue) (continue state))
       ((eq? (operand exp) 'return) (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))
       )
     )
@@ -198,8 +280,3 @@
       )
     )
   )
-
-
-        
-
-
