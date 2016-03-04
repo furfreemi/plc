@@ -8,7 +8,7 @@
 ;required interpret method
 (define interpret
   (lambda (filename)
-    (evalParseTree (parser filename) new_state)
+    (returnval (evalParseTree (parser filename) new_state))
     )
   )
 
@@ -17,7 +17,15 @@
 ;base abstractions 
 (define new_state '((() ())))
 (define new_layer '(()()))
-(define returnval cadr)
+
+(define returnval
+  (lambda (state)
+        (if (eq? (car state) 'FINISH) (cond
+                                     ((eq? #f (cadr state)) 'false)
+                                     ((eq? #t (cadr state)) 'true)
+                                     ((eq? 'UNDECLARED (cadr state)) (error 'unknown "attempting to return undefined value"))
+                                     (else (cadr state)))
+            '())))
 
 (define first_exp car)
 (define remaining_exp cdr)
@@ -54,17 +62,16 @@
 
 ;take in entire tree, empty state: break up & call other functions
 (define evalParseTree
-  (lambda (tree state)
-    (cond
-      ((null? tree) state) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
-      ;((eq? (car state) 'FINISH) (cond
-                                   ;((eq? #f (returnval state)) 'false)
-                                   ;((eq? #t (returnval state)) 'true)
-                                   ;(else (returnval state))))
-      (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state 'error 'error)))
-    )
-  )
-  )
+  (lambda (tree state)        
+    (call/cc
+     (lambda (return)
+      (cond
+        ;((null? tree) state) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        
+        (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state 'error 'error return)))
+    )))))
+  
+  
 
 
 ;helper: is this a boolean expression?
@@ -137,6 +144,7 @@
   (lambda (exp state)
     (cond
       ((null? state) 'UNDECLARED)  ;PREVIOUSLY RETURNED 'error: MAKE SURE ALL DEPENDENCIES ARE UPDATED
+      ((not (list? (car state))) (car state))
       ((null? (toplayer_vars state)) (lookup exp (cdr state)))
       ((eq? (first_topvar state) exp) (first_topval state))
       (else (lookup exp (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state))))
@@ -189,6 +197,7 @@
   (lambda (exp value state)
     (cond
       ((null? state) state)
+      ((not (list? (car state))) state)
       ((null? (toplayer_vars state)) (pushlayer (change_value exp value (lower_layers state))))
       ((eq? (lookup exp state) 'UNDECLARED) state)
       ((eq? exp (first_topvar state)) (build_modified_state (toplayer_vars state) (cons value (remaining_topvals state)) (lower_layers state)))
@@ -196,38 +205,36 @@
                       )))))
 
 (define begin_helper
-  (lambda (exp state break continue)
+  (lambda (exp state break continue return)
     (cond
       ((null? exp) (poplayer state))
-      (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue) break continue)))))
+      (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return) break continue return)))))
 
 
 ;Mstate: takes in expression, passes to Mbool or Mval as necessary to evaluate
 (define M_state
-  (lambda (exp state break continue)
-    (call/cc
-     (lambda (return)
-       (letrec ((M_stateloop (lambda (exp state break continue)
-    (cond
-      ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
-      ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (cons '(() ()) state) break continue))
-      ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state) 'UNDECLARED)))
-                                  (change_value (cadr exp) (op2 exp state) state)
-                                  (error 'unknown "variable not yet declared")))
-      ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
-                                   (M_stateloop (stmt1 exp) state break continue)
+  (lambda (exp state break continue return)
+    (letrec ((M_stateloop (lambda (exp state break continue return)
+      (cond
+        ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
+        ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (cons '(() ()) state) break continue return))
+        ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state) 'UNDECLARED)))
+                                    (change_value (cadr exp) (op2 exp state) state)
+                                    (error 'unknown "variable not yet declared")))
+        ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
+                                   (M_stateloop (stmt1 exp) state break continue return)
                                    (if (eq? (length exp) 4)
-                                       (M_stateloop (stmt2 exp) state break continue)
+                                       (M_stateloop (stmt2 exp) state break continue return)
                                         state))
                                )
-      ((eq? (operand exp) 'while) (call/cc
+        ((eq? (operand exp) 'while) (call/cc
                                    (lambda (break)
                                    (letrec ((loop (lambda (exp2 state2)  
                                    (if (M_boolean (condition exp2) state2)
                                       (loop exp2
                                        (call/cc
                                         (lambda (continue)
-                                       (M_stateloop (stmt1 exp2) state2 break continue))))
+                                       (M_stateloop (stmt1 exp2) state2 break continue return))))
                                       state2
                                       )
                                   ))) (loop exp state)))))
@@ -237,7 +244,7 @@
       ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-      ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state))))))) (M_stateloop exp state break continue))))))
+      ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return))))
 
 
 
