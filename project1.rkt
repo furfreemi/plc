@@ -189,10 +189,12 @@
     )
   )
 
+;removes the first state layer
 (define stripstate
   (lambda (state)
     (cdr state)))
 
+;changes the value of the expression to the new inputed value
 (define change_value
   (lambda (exp value state)
     (cond
@@ -204,6 +206,7 @@
       (else (addtotop (first_topvar state) (first_topval state) (change_value exp value (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
                       )))))
 
+;helper method that passes in continuations to begin for the start of a block
 (define begin_helper
   (lambda (exp state break continue throw return)
     (cond
@@ -215,7 +218,7 @@
   (lambda (value state)
     (append state (cons (cons '() (cons (cons value '()) '())) '()))))
 
-;helper method for attachvariable
+;helper method for attach_variable
 (define addstate
   (lambda (vars values state)
     (cons (cons vars (cons values '())) state)))
@@ -225,7 +228,6 @@
 (lambda (var state)
     (cond
       ((null? state) state)
-      ;((null? (toplayer_vars state)) (attach_variable var (lower_layers state))))
       ((eq? '() (toplayer_vars state)) (build_modified_state (cons var (toplayer_vars state)) (toplayer_vals state) (lower_layers state)))
       (else (addstate (toplayer_vars state) (toplayer_vals state) (attach_variable var (build_modified_state (toplayer_vars (cdr state)) (toplayer_vals (cdr state)) (lower_layers (cdr state))))
                       )))))
@@ -258,11 +260,11 @@
                                       state2
                                       )
                                   ))) (loop exp state)))))
-       ((eq? (operand exp) 'try) (M_stateloop (remaining_exp exp)
+       ((eq? (operand exp) 'try) (M_stateloop (remaining_exp exp)  ; recurse for finally
                                      (letrec ((loop (lambda (exp2 state2)
-                                                            (M_stateloop (remaining_exp exp2) (call/cc
+                                                            (M_stateloop (remaining_exp exp2) (call/cc    ; recurse for catch
                                                                                                 (lambda (throw)
-                                                                                                  (M_stateloop (first_exp exp2) state2 break continue return throw))) break continue return throw)))) (loop exp state))))
+                                                                                                  (M_stateloop (remaining_exp exp2) state2 break continue return throw))) break continue return throw)))) (loop (remaining_exp exp) state)) break continue return throw)) ;recurse for try
       ((eq? (operand exp) 'break) (if (eq? break 'error)
                                       (error 'unknown "cannot execute break outside of block")
                                       (break (stripstate state))))
