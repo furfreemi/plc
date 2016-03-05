@@ -271,9 +271,9 @@
       ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-      ((eq? (operand exp) 'catch) (catch (M_stateloop (remaining_exp) (attach_variable (caadr exp) state) break continue return throw)))
+      ((eq? (operand exp) 'catch) (M_stateloop (remaining_exp) (attach_variable (caadr exp) state) break continue return throw))
       ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
-      ((eq? (operand exp) 'finally) (finally (M_stateloop (remaining_exp exp) state break continue return throw)))
+      ((eq? (operand exp) 'finally) (M_stateloop (remaining_exp exp) state break continue return throw))
       ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
 
 
