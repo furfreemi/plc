@@ -48,6 +48,12 @@
 (define varname car)
 (define operand car)
 
+;Helper methods and abstractions for try-catch-finally
+(define finally_body cadddr)
+(define catch_body caddr)
+(define catch_var caadr)
+(define try_body cadr)
+
 ;operator definitions handle variable lookup
 (define op1
   (lambda (exp state)
@@ -258,39 +264,50 @@
                                       state2
                                       )
                                   ))) (loop exp state)))))
-       ((eq? (operand exp) 'try) (M_stateloop (finally_body exp)
-                                              (letrec ((catch_throw (lambda (exp2 state2)
-                                                                      (call/cc
-                                                                       (lambda (do_not_catch)
-                                                                         (M_stateloop (catch_body exp)
-                                                                                      (letrec ((loop (lambda (exp3 state3)
-                                                                                                       (call/cc
-                                                                                                        (lambda (throw)
-                                                                                                          (if (null? exp3)
-                                                                                                              (do_not_catch state3)
-                                                                                                              (loop (remaining_exp exp3) (M_stateloop (first_exp exp3) state3 break continue return throw)))))))) (loop (try_body exp2) state2))
-                                                                                      break continue return throw)))))) (catch_throw exp state))
-                                                                         break continue return throw))
+       ((eq? (operand exp) 'try) (letrec ((finally (lambda (exp1 state1)
+                                                     (if (null? (finally_body exp1))
+                                                         state1
+                                                         (M_stateloop (finally_body exp1) (letrec ((catch (lambda (exp2 state2)
+                                                                                            (call/cc
+                                                                                              (lambda (do_not_catch)
+                                                                                                (if (null? exp2)
+                                                                                                  state2
+                                                                                                  (M_stateloop (catch_body exp2) (letrec ((try (lambda (exp3 state3)
+                                                                                                                                   (call/cc
+                                                                                                                                     (lambda (throw)
+                                                                                                                                       (if (null? exp3)
+                                                                                                                                         (do_not_catch state3)
+                                                                                                                                         (try (remaining_exp exp3) (M_stateloop (first_exp exp3) state3 break continue return throw))))))))
+                                                                                                                                   (try (try_body exp2) state2))
+                                                                                                               break continue return throw))))))) (catch exp1 state))
+                                                                         break continue return throw))))) (finally exp state)))
       ((eq? (operand exp) 'break) (if (eq? break 'error)
                                       (error 'unknown "cannot execute break outside of block")
                                       (break (stripstate state))))
       ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-      ((eq? (operand exp) 'catch) (M_stateloop (remaining_exp exp) (attach_variable (caadr exp) state) break continue return throw))
+      ((eq? (operand exp) 'catch) (catch_helper (catch_exp exp) (attach_variable (catch_var exp) state) break continue return throw));(M_stateloop (remaining_exp exp) (attach_variable (catch_var exp) state) break continue return throw))
       ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
-      ((eq? (operand exp) 'finally) (finally_helper (remaining_exp exp) state break continue return throw))  ;(M_stateloop (remaining_exp exp) state break continue return throw))
+      ((eq? (operand exp) 'finally) (finally_helper (finally_exp exp) state break continue return throw))  ;(M_stateloop (remaining_exp exp) state break continue return throw))
       ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
+;(catch (e) (()()))
+(define catch_exp caddr)
+(define finally_exp cadr)
+  
+(define catch_helper
+  (lambda (exp state break continue return throw)
+    (letrec ((loop (lambda (exp2 state2)
+                     (if (null? exp2)
+                         state2
+                         (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))
 
-(define finally_body cadddr)
-(define catch_body caddr)
-(define try_body cadr)
 (define finally_helper
   (lambda (exp state break continue return throw)
       (letrec ((loop (lambda (exp2 state2)
                       (if (null? exp2)
                           state2
-                          (loop (remaining_exp exp2) (M_stateloop (first_exp exp2) state2 break continue return throw)))))) (loop (remaining_exp exp) state))))
+                          (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))
 
 ;takes in expression and attempts to evaluate its value    
 (define M_value
