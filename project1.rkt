@@ -259,27 +259,38 @@
                                       )
                                   ))) (loop exp state)))))
        ((eq? (operand exp) 'try) (M_stateloop (finally_body exp)
-                                              (M_stateloop (catch_body exp)
-                                                           (letrec ((loop (lambda (exp2 state2)
-                                                                            (call/cc
-                                                                             (lambda (throw)
-                                                                               (loop (remaining_exp exp2) (M_stateloop (first_exp exp2) state2 break continue return throw))))))) (loop (try_body exp) state))
-                                              break continue return throw)
-                                 break continue return throw))
+                                              (letrec ((catch_throw (lambda (exp2 state2)
+                                                                      (call/cc
+                                                                       (lambda (do_not_catch)
+                                                                         (M_stateloop (catch_body exp)
+                                                                                      (letrec ((loop (lambda (exp3 state3)
+                                                                                                       (call/cc
+                                                                                                        (lambda (throw)
+                                                                                                          (if (null? exp3)
+                                                                                                              (do_not_catch state3)
+                                                                                                              (loop (remaining_exp exp3) (M_stateloop (first_exp exp3) state3 break continue return throw)))))))) (loop (try_body exp2) state2))
+                                                                                      break continue return throw)))))) (catch_throw exp state))
+                                                                         break continue return throw))
       ((eq? (operand exp) 'break) (if (eq? break 'error)
                                       (error 'unknown "cannot execute break outside of block")
                                       (break (stripstate state))))
       ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-      ((eq? (operand exp) 'catch) (catch (M_stateloop (remaining_exp) (attach_variable (caadr exp) state) break continue return throw)))
+      ((eq? (operand exp) 'catch) (M_stateloop (remaining_exp exp) (attach_variable (caadr exp) state) break continue return throw))
       ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
-      ((eq? (operand exp) 'finally) (finally (M_stateloop (remaining_exp exp) state break continue return throw)))
+      ((eq? (operand exp) 'finally) (finally_helper (remaining_exp exp) state break continue return throw))  ;(M_stateloop (remaining_exp exp) state break continue return throw))
       ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
 
 (define finally_body cadddr)
 (define catch_body caddr)
 (define try_body cadr)
+(define finally_helper
+  (lambda (exp state break continue return throw)
+      (letrec ((loop (lambda (exp2 state2)
+                      (if (null? exp2)
+                          state2
+                          (loop (remaining_exp exp2) (M_stateloop (first_exp exp2) state2 break continue return throw)))))) (loop (remaining_exp exp) state))))
 
 ;takes in expression and attempts to evaluate its value    
 (define M_value
