@@ -63,9 +63,9 @@
   (lambda (exp state)
     (M_value (caddr exp) state)))
 
-(define invalid_throw (lambda () (error 'error "Throw without catch")))
-(define invalid_break (lambda () (error 'error "Illegal break")))
-(define invalid_continue (lambda () (error 'error "Illegal continue")))
+(define invalid_throw (lambda (s) (error 'error "Throw without catch")))
+(define invalid_break (lambda (s) (error 'error "Illegal break")))
+(define invalid_continue (lambda (s) (error 'error "Illegal continue")))
 
 
 
@@ -214,9 +214,12 @@
 
 (define begin_helper
   (lambda (exp state break continue throw return)
-    (cond
-      ((null? exp) (poplayer state))
-      (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
+    (let ((scope (lambda (break2 continue2)
+                   (cdr (state_run_helper exp (cons (cons '() (cons '() '())) state) break2 continue2 throw return)))))
+    (scope (lambda (s) (break (cdr s))) (lambda (s) (continue (cdr s)))))))
+    ;(cond
+    ;  ((null? exp) (poplayer state))
+    ;  (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
 
 ;helper method for throw, pushes a state for throw at the end of the state
 (define push_to_end
@@ -234,7 +237,8 @@
     (cond
       ((null? state) state)
       ;((null? (toplayer_vars state)) (attach_variable var (lower_layers state))))
-      ((eq? '() (toplayer_vars state)) (build_modified_state (cons var (toplayer_vars state)) (toplayer_vals state) (lower_layers state)))
+      ((and (eq? '() (toplayer_vars state)) (not (null? (toplayer_vals state)))) (build_modified_state (cons var (toplayer_vars state)) (toplayer_vals state) (lower_layers state)))
+      ((eq? '() (toplayer_vars state)) (cons (car state) (attach_variable var (poplayer state))))
       (else (addstate (toplayer_vars state) (toplayer_vals state) (attach_variable var (build_modified_state (toplayer_vars (cdr state)) (toplayer_vals (cdr state)) (lower_layers (cdr state))))
                       )))))
 
@@ -255,40 +259,40 @@
                                        (M_stateloop (stmt2 exp) state break continue return throw)
                                         state))
                                )
-        ((eq? (operand exp) 'while) (call/cc
-                                   (lambda (break)
-                                   (letrec ((loop (lambda (exp2 state2)  
-                                   (if (M_boolean (condition exp2) state2)
-                                      (loop exp2
-                                       (call/cc
-                                        (lambda (continue)
-                                       (M_stateloop (stmt1 exp2) state2 break continue return throw))))
-                                      state2
-                                      )
-                                  ))) (loop exp state)))))
-       ((eq? (operand exp) 'try) (M_state_try-catch-finally exp state break continue return throw))
-      ((eq? (operand exp) 'break) (if (eq? break 'error)
+        ((eq? (operand exp) 'while) (M_state_while exp state break continue return throw))
+        ((eq? (operand exp) 'try) (M_state_try-catch-finally exp state break continue return throw))
+        ((eq? (operand exp) 'break) (if (eq? break 'error)
                                       (error 'unknown "cannot execute break outside of block")
                                       (break (stripstate state))))
-      ((eq? (operand exp) 'continue) (if (eq? continue 'error)
+        ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-      ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
-      ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
+        ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
+        ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
 ;(catch (e) (()()))
 (define catch_exp caddr)
 (define finally_exp cadr)
 
-(define try_catch_finally_state_helper
+(define state_run_helper
   (lambda (exp state break continue return throw)
     (letrec ((loop (lambda (exp2 state2)
                      (if (null? exp2)
                          state2
                          (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))
 
-(define run_try try_catch_finally_state_helper)
-(define run_finally try_catch_finally_state_helper)
-(define run_catch try_catch_finally_state_helper)
+(define run_try state_run_helper)
+(define run_finally state_run_helper)
+(define run_catch state_run_helper)
+
+(define M_state_while
+  (lambda (exp state break continue return throw)
+    (call/cc
+     (lambda (break_while)
+       (letrec ((loop (lambda (exp2 state2)
+                        (if (M_boolean (condition exp2) state2)
+                            (loop exp2 (M_state (stmt1 exp2) state2 break (lambda (state3) (break_while (loop exp2 state3))) return throw))
+                            state2))))
+         (loop exp state))))))
 
 (define M_state_try-catch-finally
   (lambda (exp state break continue return throw)
@@ -297,14 +301,18 @@
         (letrec ((finally (lambda (s)
                             (if (null? (finally_body exp))
                                 s
-                                (run_finally (finally_exp (finally_body exp)) s break continue return throw))))
+                                (run_finally (finally_exp (finally_body exp)) s break continue return throw_break))))
                  (catch (lambda (s)
-                          (finally (run_catch (catch_exp (catch_body exp)) (attach_variable (catch_var (catch_body exp)) s) break continue return throw))))
+                          (finally (removevar (catch_var (catch_exp exp)) (run_catch (catch_exp (catch_body exp)) (attach_variable (catch_var (catch_body exp)) s) break continue return invalid_throw)))))
                  (try (lambda (s catch_throw)
                         (finally (run_try (try_body exp) s break continue return catch_throw)))))
           (try state (lambda (s) (throw_break (catch s)))))))))
 
-;takes in expression and attempts to evaluate its value    
+;takes in expression and attempts to evaluate its value
+(define popcatchvar
+  (lambda (v s)
+    (removevar v s)))
+
 (define M_value
   (lambda (exp state)
     (cond
