@@ -1,6 +1,6 @@
 ;Larissa Marcich, Dina Benayad-Cherif, Adam Gleichsner
 ;lmm154, dxb448, amg188
-;Project 1: EECS 345
+;Project 3: EECS 345
 
 
 (load "functionParser.scm")
@@ -8,7 +8,15 @@
 ;required interpret method
 (define interpret
   (lambda (filename)
-    (car (evalParseTree (parser filename) new_state))))
+    (returnval (evalParseTree (parser filename) new_state))))
+
+(define value car)
+(define returnval
+  (lambda (pair)
+    (cond
+      ((eq? (value pair) #t) 'true)
+      ((eq? (value pair) #f) 'false)
+      (else (value pair)))))
 
 ;base abstractions 
 (define new_state '((() ())))
@@ -24,9 +32,7 @@
 ; add var and val to top layer of state
 (define addtotop
   (lambda (var val state)
-    (cons (cons (cons var (toplayer_vars state)) (cons (cons val (toplayer_vals state)) '())) (cdr state))
-    ))
-
+    (cons (cons (cons var (toplayer_vars state)) (cons (cons val (toplayer_vals state)) '())) (cdr state))))
 
 (define condition cadr)
 (define stmt1 caddr)
@@ -43,12 +49,12 @@
 
 ;operator definitions handle variable lookup
 (define op1
-  (lambda (exp state)
-    (get_value (M_value (cadr exp) state))))
+  (lambda (exp state throw)
+    (get_value (M_value (cadr exp) state throw))))
 
 (define op2
-  (lambda (exp state)
-    (get_value (M_value (caddr exp) state))))
+  (lambda (exp state throw)
+    (get_value (M_value (caddr exp) state throw))))
 
 (define invalid_throw (lambda (s) (error 'error "Throw without catch")))
 (define invalid_break (lambda (s) (error 'error "Illegal break")))
@@ -100,13 +106,13 @@
 
 ; add new variable and value (or initialize to error) to top layer of state, return new state
 (define add
-  (lambda (exp state)
+  (lambda (exp state throw)
     (cond
       ;((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
       ((eq? (length exp) 1) ; var not immediately initialized: add in with 'error inital value
            (addtotop (varname exp) 'error state))
       ((eq? (length exp) 2) ; add in var with initalized value
-           (addtotop (varname exp) (op1 exp state) state))
+           (addtotop (varname exp) (op1 exp state throw) state))
       (else (error 'unknown "unknown expression"))
       )
     )
@@ -140,7 +146,6 @@
 ; get value of a variable from state: returns 'error if undefined
 (define lookup
   (lambda (exp state)
-    ;(lookup_from_end exp state)))
     (cond
       ((null? state) 'UNDECLARED)  ;PREVIOUSLY RETURNED 'error: MAKE SURE ALL DEPENDENCIES ARE UPDATED
       ((not (list? (car state))) (car state))
@@ -159,19 +164,6 @@
 (define top_state
   (lambda (state)
     (car state)))
-
-(define lookup_from_end
-  (lambda (exp state)
-    (call/cc
-     (lambda (break)
-       (letrec ((loop (lambda (e s)
-                        (cond
-                          ((null? state) 'UNDECLARED)
-                          ((not (list? (car s))) (car s))
-                          ((null? (toplayer_vars s)) (loop e (cdr s)))
-                          ((eq? (first_topvar s) e) (break (loop e (build_modified_state (remaining_topvars s) (remaining_topvals s) (lower_layers s)))))
-                          (else (loop e (build_modified_state (remaining_topvars s) (remaining_topvals s) (lower_layers s))))))))
-         (loop exp state))))))
 
 ;checks if state contains a variable (if variable has been initialized yet) ;PREVIOUSLY TOOK VARLIST: make sure all uses are updated to input entire state
 (define initialized?
@@ -229,7 +221,7 @@
                    ;(cdr (state_run_helper exp (cons (cons '() (cons '() '())) state) break2 continue2 throw return)))))
     ;(scope (lambda (s) (break (cdr s))) (lambda (s) (continue (cdr s)))))))
     (cond
-      ((null? exp) (poplayer state))
+      ((null? exp) state)
       (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
 
 (define add_scope
@@ -263,12 +255,12 @@
   (lambda (exp state break continue return throw)
     (letrec ((M_stateloop (lambda (exp state break continue return throw)
       (cond
-        ((eq? (operand exp) 'var) (add (remaining_exp exp) state))
-        ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) (cons '(() ()) state) break continue return throw))
-        ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state) 'UNDECLARED)))
-                                    (change_value (cadr exp) (op2 exp state) state)
+        ((eq? (operand exp) 'var) (add (remaining_exp exp) state throw))
+        ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) state break continue return throw))
+        ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state throw) 'UNDECLARED)))
+                                    (change_value (cadr exp) (op2 exp state throw) state)
                                     (error 'unknown "variable not yet declared")))
-        ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state)
+        ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state throw)
                                    (M_stateloop (stmt1 exp) state break continue return throw)
                                    (if (eq? (length exp) 4)
                                        (M_stateloop (stmt2 exp) state break continue return throw)
@@ -284,11 +276,12 @@
         ((eq? (operand exp) 'throw) (throw (push_to_end (get_value (M_value (remaining_exp exp) state)) state)))
         ((eq? (operand exp) 'function) (M_state_function exp state break continue return throw))
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
-        ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state))))))) (M_stateloop exp state break continue return throw))))
+        ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state throw))))))) (M_stateloop exp state break continue return throw))))
 
 (define M_state_funcall
   (lambda (exp state break continue return throw)
-       (cons (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw)) '())))
+       ;(cons (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw)) '())))
+    (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw))))
 
 (define M_state_function
   (lambda (exp state break continue return throw)
@@ -305,7 +298,7 @@
      (lambda (return)
        (letrec ((loop (lambda (exp2 state2)
                      (if (null? exp2)
-                         state2
+                         (cons '() (cons state2 '()))
                          (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))))
 
 (define run_try state_run_helper)
@@ -317,7 +310,7 @@
     (call/cc
      (lambda (break_while)
        (letrec ((loop (lambda (exp2 state2)
-                        (if (M_boolean (condition exp2) state2)
+                        (if (M_boolean (condition exp2) state2 throw)
                             (loop exp2 (M_state (stmt1 exp2) state2 break (lambda (state3) (break_while (loop exp2 state3))) return throw))
                             state2))))
          (loop exp state))))))
@@ -348,7 +341,7 @@
 (define get_value car)
 
 (define M_value
-  (lambda (exp state)
+  (lambda (exp state throw)
     (cond
       ((number? exp) (add_state exp state))
       ((boolean? exp) (add_state exp state))
@@ -358,15 +351,15 @@
       ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
                              (error 'unknown "var unknown")  ;unknown variable: error
                              (add_state (lookup exp state) state))) ;if var value exists in state, return value
-      ((eq? (operand exp) '+) (add_state (+ (op1 exp state) (op2 exp state)) state))
+      ((eq? (operand exp) '+) (add_state (+ (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '-) (if (eq? (length exp) 3)
-                                  (add_state (- (op1 exp state) (op2 exp state)) state)
+                                  (add_state (- (op1 exp state throw) (op2 exp state throw)) state)
                                   (add_state (- 0 (op1 exp state)) state)))
-      ((eq? (operand exp) '*) (add_state (* (op1 exp state) (op2 exp state)) state))
-      ((eq? (operand exp) '/) (add_state (quotient (op1 exp state) (op2 exp state)) state))
-      ((eq? (operand exp) '%) (add_state (remainder (op1 exp state) (op2 exp state)) state))
-      ((eq? (operand exp) 'funcall) (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  invalid_break invalid_continue (lambda (v) (return v)) invalid_throw))
-      ((pair? exp) (M_value (car exp) state))
+      ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
+      ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
+      ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
+      ((eq? (operand exp) 'funcall) (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  invalid_break invalid_continue (lambda (v) (return v)) throw))
+      ((pair? exp) (M_value (car exp) state throw))
       (else (error 'unknown exp)) 
       )
     )
@@ -377,28 +370,28 @@
     (cons (global_state state) (cons (top_state state) '()))))
 
 (define bind_func_vars
-  (lambda (vars vals new_scope state)
+  (lambda (vars vals new_scope state throw)
     (cond
       ((and (null? vars) (null? vals)) new_scope)
       ((and (null? vars) (not (null? vals))) (error 'error "Too many input values"))
       ((and (not (null? vars)) (null? vals)) (error 'error "Not enough input values"))
-      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state)) (cadr new_scope)) '())) state)))))
+      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state throw)) (cadr new_scope)) '())) state throw)))))
 
 ; evaluates boolean expressions
 (define M_boolean
-  (lambda (exp state)
+  (lambda (exp state throw)
     (cond
       ((boolean? exp) exp)
       ((eq? exp 'true) #t)
       ((eq? exp 'false) #f)
-      ((eq? (operand exp) '!=) (not (eq? (op1 exp state) (op2 exp state))))
-      ((eq? (operand exp) '==) (eq? (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '>) (> (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '<) (< (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '<=) (<= (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '>=) (>= (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '&&) (and (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '||) (or (op1 exp state) (op2 exp state)))
+      ((eq? (operand exp) '!=) (not (eq? (op1 exp state throw) (op2 exp state throw))))
+      ((eq? (operand exp) '==) (eq? (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '>) (> (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '<) (< (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '<=) (<= (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '>=) (>= (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '&&) (and (op1 exp state throw) (op2 exp state throw)))
+      ((eq? (operand exp) '||) (or (op1 exp state throw) (op2 exp state throw)))
       ((eq? (operand exp) '!) (not (op1 exp state)))
       (else (error 'unknown "unknown expression"))
       )
