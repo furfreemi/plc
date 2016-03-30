@@ -8,7 +8,7 @@
 ;required interpret method
 (define interpret
   (lambda (filename)
-    (evalParseTree (parser filename) new_state)))
+    (car (evalParseTree (parser filename) new_state))))
 
 ;base abstractions 
 (define new_state '((() ())))
@@ -44,11 +44,11 @@
 ;operator definitions handle variable lookup
 (define op1
   (lambda (exp state)
-    (M_value (cadr exp) state)))
+    (get_value (M_value (cadr exp) state))))
 
 (define op2
   (lambda (exp state)
-    (M_value (caddr exp) state)))
+    (get_value (M_value (caddr exp) state))))
 
 (define invalid_throw (lambda (s) (error 'error "Throw without catch")))
 (define invalid_break (lambda (s) (error 'error "Illegal break")))
@@ -281,16 +281,14 @@
         ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-        ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
+        ((eq? (operand exp) 'throw) (throw (push_to_end (get_value (M_value (remaining_exp exp) state)) state)))
         ((eq? (operand exp) 'function) (M_state_function exp state break continue return throw))
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
         ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state))))))) (M_stateloop exp state break continue return throw))))
 
 (define M_state_funcall
   (lambda (exp state break continue return throw)
-    (call/cc
-     (lambda (break)
-       (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) (break)) throw)))))
+       (cons (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw)) '())))
 
 (define M_state_function
   (lambda (exp state break continue return throw)
@@ -347,24 +345,26 @@
   (lambda (v state)
     (cons v (cons state '()))))
 
+(define get_value car)
+
 (define M_value
   (lambda (exp state)
     (cond
-      ((number? exp) exp)
-      ((boolean? exp) exp)
-      ((eq? exp 'true) #t)
-      ((eq? exp 'false) #f)
-      ((bool? exp) (M_boolean exp state))
+      ((number? exp) (add_state exp state))
+      ((boolean? exp) (add_state exp state))
+      ((eq? exp 'true) (add_state #t state))
+      ((eq? exp 'false) (add_state #f state))
+      ((bool? exp) (add_state (M_boolean exp state) state))
       ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
                              (error 'unknown "var unknown")  ;unknown variable: error
-                             (lookup exp state))) ;if var value exists in state, return value
-      ((eq? (operand exp) '+) (+ (op1 exp state) (op2 exp state)))
+                             (add_state (lookup exp state) state))) ;if var value exists in state, return value
+      ((eq? (operand exp) '+) (add_state (+ (op1 exp state) (op2 exp state)) state))
       ((eq? (operand exp) '-) (if (eq? (length exp) 3)
-                                  (- (op1 exp state) (op2 exp state))
-                                  (- 0 (op1 exp state))))
-      ((eq? (operand exp) '*) (* (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '/) (quotient (op1 exp state) (op2 exp state)))
-      ((eq? (operand exp) '%) (remainder (op1 exp state) (op2 exp state)))
+                                  (add_state (- (op1 exp state) (op2 exp state)) state)
+                                  (add_state (- 0 (op1 exp state)) state)))
+      ((eq? (operand exp) '*) (add_state (* (op1 exp state) (op2 exp state)) state))
+      ((eq? (operand exp) '/) (add_state (quotient (op1 exp state) (op2 exp state)) state))
+      ((eq? (operand exp) '%) (add_state (remainder (op1 exp state) (op2 exp state)) state))
       ((eq? (operand exp) 'funcall) (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  invalid_break invalid_continue (lambda (v) (return v)) invalid_throw))
       ((pair? exp) (M_value (car exp) state))
       (else (error 'unknown exp)) 
@@ -379,8 +379,10 @@
 (define bind_func_vars
   (lambda (vars vals new_scope state)
     (cond
-      ((or (null? vars) (null? vals)) new_scope)
-      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (M_value (car vals) state) (cadr new_scope)) '())) state)))))
+      ((and (null? vars) (null? vals)) new_scope)
+      ((and (null? vars) (not (null? vals))) (error 'error "Too many input values"))
+      ((and (not (null? vars)) (null? vals)) (error 'error "Not enough input values"))
+      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state)) (cadr new_scope)) '())) state)))))
 
 ; evaluates boolean expressions
 (define M_boolean
