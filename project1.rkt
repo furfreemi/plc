@@ -3,29 +3,16 @@
 ;Project 1: EECS 345
 
 
-(load "simpleParser.scm")
+(load "functionParser.scm")
 
 ;required interpret method
 (define interpret
   (lambda (filename)
-    (returnval (evalParseTree (parser filename) new_state))
-    )
-  )
-
-
+    (evalParseTree (parser filename) new_state)))
 
 ;base abstractions 
 (define new_state '((() ())))
 (define new_layer '(()()))
-
-(define returnval
-  (lambda (state)
-        (if (eq? (car state) 'FINISH) (cond
-                                     ((eq? #f (cadr state)) 'false)
-                                     ((eq? #t (cadr state)) 'true)
-                                     ((eq? 'UNDECLARED (cadr state)) (error 'unknown "attempting to return undefined value"))
-                                     (else (cadr state)))
-            '())))
 
 (define first_exp car)
 (define remaining_exp cdr)
@@ -67,7 +54,9 @@
 (define invalid_break (lambda (s) (error 'error "Illegal break")))
 (define invalid_continue (lambda (s) (error 'error "Illegal continue")))
 
-
+(define cadddar
+  (lambda (l)
+    (car (cdr (cdr (cdr (car l)))))))
 
 ;take in entire tree, empty state: break up & call other functions
 (define evalParseTree
@@ -76,6 +65,7 @@
      (lambda (return)
       (cond
         ((null? tree) (error 'error "No return")) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ((eq? (cadar tree) 'main) (evalParseTree (remaining_exp (cadddar tree)) (M_state (first_exp (cadddar tree)) (add_scope state) invalid_break invalid_continue return invalid_throw)))
         (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw)))
     )))))
   
@@ -112,7 +102,7 @@
 (define add
   (lambda (exp state)
     (cond
-      ((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
+      ;((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
       ((eq? (length exp) 1) ; var not immediately initialized: add in with 'error inital value
            (addtotop (varname exp) 'error state))
       ((eq? (length exp) 2) ; add in var with initalized value
@@ -148,17 +138,40 @@
 
 
 ; get value of a variable from state: returns 'error if undefined
-(define lookup 
+(define lookup
   (lambda (exp state)
+    ;(lookup_from_end exp state)))
     (cond
       ((null? state) 'UNDECLARED)  ;PREVIOUSLY RETURNED 'error: MAKE SURE ALL DEPENDENCIES ARE UPDATED
       ((not (list? (car state))) (car state))
       ((null? (toplayer_vars state)) (lookup exp (cdr state)))
       ((eq? (first_topvar state) exp) (first_topval state))
       (else (lookup exp (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state))))
-      )
+     )
     )
   )
+(define global_state
+  (lambda (state)
+    (if (null? (cdr state))
+        (car state)
+        (global_state (cdr state)))))
+
+(define top_state
+  (lambda (state)
+    (car state)))
+
+(define lookup_from_end
+  (lambda (exp state)
+    (call/cc
+     (lambda (break)
+       (letrec ((loop (lambda (e s)
+                        (cond
+                          ((null? state) 'UNDECLARED)
+                          ((not (list? (car s))) (car s))
+                          ((null? (toplayer_vars s)) (loop e (cdr s)))
+                          ((eq? (first_topvar s) e) (break (loop e (build_modified_state (remaining_topvars s) (remaining_topvals s) (lower_layers s)))))
+                          (else (loop e (build_modified_state (remaining_topvars s) (remaining_topvals s) (lower_layers s))))))))
+         (loop exp state))))))
 
 ;checks if state contains a variable (if variable has been initialized yet) ;PREVIOUSLY TOOK VARLIST: make sure all uses are updated to input entire state
 (define initialized?
@@ -181,8 +194,6 @@
     )
   )
     
-
-
 ; remove variable and its value from state, return new state
 ; if variable not present just returns existing state
 (define removevar
@@ -213,13 +224,17 @@
                       )))))
 
 (define begin_helper
-  (lambda (exp state break continue throw return)
-    (let ((scope (lambda (break2 continue2)
-                   (cdr (state_run_helper exp (cons (cons '() (cons '() '())) state) break2 continue2 throw return)))))
-    (scope (lambda (s) (break (cdr s))) (lambda (s) (continue (cdr s)))))))
-    ;(cond
-    ;  ((null? exp) (poplayer state))
-    ;  (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
+  (lambda (exp state break continue return throw)
+    ;(let ((scope (lambda (break2 continue2)
+                   ;(cdr (state_run_helper exp (cons (cons '() (cons '() '())) state) break2 continue2 throw return)))))
+    ;(scope (lambda (s) (break (cdr s))) (lambda (s) (continue (cdr s)))))))
+    (cond
+      ((null? exp) (poplayer state))
+      (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
+
+(define add_scope
+  (lambda (state)
+    (cons (cons '() (cons '() '())) state)))
 
 ;helper method for throw, pushes a state for throw at the end of the state
 (define push_to_end
@@ -257,8 +272,7 @@
                                    (M_stateloop (stmt1 exp) state break continue return throw)
                                    (if (eq? (length exp) 4)
                                        (M_stateloop (stmt2 exp) state break continue return throw)
-                                        state))
-                               )
+                                        state)))
         ((eq? (operand exp) 'while) (M_state_while exp state break continue return throw))
         ((eq? (operand exp) 'try) (M_state_try-catch-finally exp state break continue return throw))
         ((eq? (operand exp) 'break) (if (eq? break 'error)
@@ -268,17 +282,33 @@
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
         ((eq? (operand exp) 'throw) (throw (push_to_end (M_value (remaining_exp exp) state) state)))
-        ((eq? (operand exp) 'return) (return (cons 'FINISH (cons (M_value (remaining_exp exp) state) '())))))))) (M_stateloop exp state break continue return throw))))
+        ((eq? (operand exp) 'function) (M_state_function exp state break continue return throw))
+        ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
+        ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state))))))) (M_stateloop exp state break continue return throw))))
+
+(define M_state_funcall
+  (lambda (exp state break continue return throw)
+    (call/cc
+     (lambda (break)
+       (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) (break)) throw)))))
+
+(define M_state_function
+  (lambda (exp state break continue return throw)
+    (addtotop (cadr exp) (cons (caddr exp) (cons (cadddr exp) '())) state)))
+    
+    
 ;(catch (e) (()()))
 (define catch_exp caddr)
 (define finally_exp cadr)
 
 (define state_run_helper
   (lambda (exp state break continue return throw)
-    (letrec ((loop (lambda (exp2 state2)
+    (call/cc
+     (lambda (return)
+       (letrec ((loop (lambda (exp2 state2)
                      (if (null? exp2)
                          state2
-                         (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))
+                         (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))))
 
 (define run_try state_run_helper)
 (define run_finally state_run_helper)
@@ -313,6 +343,10 @@
   (lambda (v s)
     (removevar v s)))
 
+(define add_state
+  (lambda (v state)
+    (cons v (cons state '()))))
+
 (define M_value
   (lambda (exp state)
     (cond
@@ -331,11 +365,22 @@
       ((eq? (operand exp) '*) (* (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '/) (quotient (op1 exp state) (op2 exp state)))
       ((eq? (operand exp) '%) (remainder (op1 exp state) (op2 exp state)))
+      ((eq? (operand exp) 'funcall) (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  invalid_break invalid_continue (lambda (v) (return v)) invalid_throw))
       ((pair? exp) (M_value (car exp) state))
       (else (error 'unknown exp)) 
       )
     )
   )
+
+(define make_static_state
+  (lambda (state)
+    (cons (global_state state) (cons (top_state state) '()))))
+
+(define bind_func_vars
+  (lambda (vars vals new_scope state)
+    (cond
+      ((or (null? vars) (null? vals)) new_scope)
+      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (M_value (car vals) state) (cadr new_scope)) '())) state)))))
 
 ; evaluates boolean expressions
 (define M_boolean
