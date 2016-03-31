@@ -273,7 +273,7 @@
         ((eq? (operand exp) 'continue) (if (eq? continue 'error)
                                       (error 'unknown "cannot execute continue outside of block")
                                       (continue (stripstate state))))
-        ((eq? (operand exp) 'throw) (throw (push_to_end (get_value (M_value (remaining_exp exp) state)) state)))
+        ((eq? (operand exp) 'throw) (throw (push_to_end (get_value (M_value (remaining_exp exp) state throw)) state)))
         ((eq? (operand exp) 'function) (M_state_function exp state break continue return throw))
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
         ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state throw))))))) (M_stateloop exp state break continue return throw))))
@@ -281,7 +281,7 @@
 (define M_state_funcall
   (lambda (exp state break continue return throw)
        ;(cons (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw)) '())))
-    (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw))))
+    (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  break continue (lambda (v) (cadr v)) throw))))
 
 (define M_state_function
   (lambda (exp state break continue return throw)
@@ -321,10 +321,10 @@
      (lambda (throw_break)
         (letrec ((finally (lambda (s)
                             (if (null? (finally_body exp))
-                                s
-                                (run_finally (finally_exp (finally_body exp)) s break continue return throw_break))))
+                                (cadr s)
+                                (cadr (run_finally (finally_exp (finally_body exp)) (cadr s) break continue return throw_break)))))
                  (catch (lambda (s)
-                          (finally (removevar (catch_var (catch_exp exp)) (run_catch (catch_exp (catch_body exp)) (attach_variable (catch_var (catch_body exp)) s) break continue return invalid_throw)))))
+                          (finally (cons '() (cons (removevar (catch_var (catch_exp exp)) (cadr (run_catch (catch_exp (catch_body exp)) (attach_variable (catch_var (catch_body exp)) s) break continue return invalid_throw))) '())))))
                  (try (lambda (s catch_throw)
                         (finally (run_try (try_body exp) s break continue return catch_throw)))))
           (try state (lambda (s) (throw_break (catch s)))))))))
@@ -347,7 +347,7 @@
       ((boolean? exp) (add_state exp state))
       ((eq? exp 'true) (add_state #t state))
       ((eq? exp 'false) (add_state #f state))
-      ((bool? exp) (add_state (M_boolean exp state) state))
+      ((bool? exp) (add_state (M_boolean exp state throw) state))
       ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
                              (error 'unknown "var unknown")  ;unknown variable: error
                              (add_state (lookup exp state) state))) ;if var value exists in state, return value
@@ -392,7 +392,7 @@
       ((eq? (operand exp) '>=) (>= (op1 exp state throw) (op2 exp state throw)))
       ((eq? (operand exp) '&&) (and (op1 exp state throw) (op2 exp state throw)))
       ((eq? (operand exp) '||) (or (op1 exp state throw) (op2 exp state throw)))
-      ((eq? (operand exp) '!) (not (op1 exp state)))
+      ((eq? (operand exp) '!) (not (op1 exp state throw)))
       (else (error 'unknown "unknown expression"))
       )
     )
