@@ -56,6 +56,7 @@
   (lambda (exp state throw)
     (get_value (M_value (caddr exp) state throw))))
 
+;helper functions to catch illegal throws/breaks/continues
 (define invalid_throw (lambda (s) (error 'error "Throw without catch")))
 (define invalid_break (lambda (s) (error 'error "Illegal break")))
 (define invalid_continue (lambda (s) (error 'error "Illegal continue")))
@@ -70,14 +71,11 @@
     (call/cc
      (lambda (return)
       (cond
-        ((null? tree) (error 'error "No return")) ;IF END: RETURNS STATE- for testing purposes only, remove! ;;;;;;;;;;;;;;;;;;;;;;;;;;;;
+        ((null? tree) (error 'error "No return"))
         ((eq? (cadar tree) 'main) (evalParseTree (remaining_exp (cadddar tree)) (M_state (first_exp (cadddar tree)) (add_scope state) invalid_break invalid_continue return invalid_throw)))
         (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw)))
     )))))
   
-  
-
-
 ;helper: is this a boolean expression?
 (define bool?
   (lambda (exp)
@@ -108,7 +106,6 @@
 (define add
   (lambda (exp state throw)
     (cond
-      ;((initialized? (varname exp) state) (error 'unknown "redefining already declared variable")) ;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;;alter to take in new state type?
       ((eq? (length exp) 1) ; var not immediately initialized: add in with 'error inital value
            (addtotop (varname exp) 'error state))
       ((eq? (length exp) 2) ; add in var with initalized value
@@ -155,12 +152,15 @@
      )
     )
   )
+
+; gets the rightmost scope in the state
 (define global_state
   (lambda (state)
     (if (null? (cdr state))
         (car state)
         (global_state (cdr state)))))
 
+; gets the leftmost scope in state
 (define top_state
   (lambda (state)
     (car state)))
@@ -200,10 +200,12 @@
     )
   )
 
+; removes topmost state
 (define stripstate
   (lambda (state)
     (cdr state)))
 
+; changes a value in state with new value
 (define change_value
   (lambda (exp value state)
     (cond
@@ -215,15 +217,14 @@
       (else (addtotop (first_topvar state) (first_topval state) (change_value exp value (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
                       )))))
 
+; runs a begin block
 (define begin_helper
   (lambda (exp state break continue return throw)
-    ;(let ((scope (lambda (break2 continue2)
-                   ;(cdr (state_run_helper exp (cons (cons '() (cons '() '())) state) break2 continue2 throw return)))))
-    ;(scope (lambda (s) (break (cdr s))) (lambda (s) (continue (cdr s)))))))
     (cond
       ((null? exp) state)
       (else (begin_helper (remaining_exp exp) (M_state (first_exp exp) state break continue return throw) break continue return throw)))))
 
+; Adds a new, empty layer of scope
 (define add_scope
   (lambda (state)
     (cons (cons '() (cons '() '())) state)))
@@ -278,20 +279,26 @@
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
         ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state throw))))))) (M_stateloop exp state break continue return throw))))
 
+; Runs state for funcalls
 (define M_state_funcall
   (lambda (exp state break continue return throw)
-       ;(cons (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state)) (cons (global_state state) '()))  break continue (lambda (v) v) throw)) '())))
     (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  break continue (lambda (v) (cadr v)) throw))))
 
+; Runs state for function
 (define M_state_function
   (lambda (exp state break continue return throw)
-    (addtotop (cadr exp) (cons (caddr exp) (cons (cadddr exp) '())) state)))
+    (addtotop (cadr exp) (cons (caddr exp) (cons (cadddr exp) (cons (get_local_scope state) '()))) state)))
+
+; Gets local scope
+(define get_local_scope
+  (lambda (state)
+    (if (null? (cdr state)) '(() ())
+        (car state))))
     
-    
-;(catch (e) (()()))
 (define catch_exp caddr)
 (define finally_exp cadr)
 
+; loops through given expression, returns (returnVal (state))
 (define state_run_helper
   (lambda (exp state break continue return throw)
     (call/cc
@@ -305,6 +312,7 @@
 (define run_finally state_run_helper)
 (define run_catch state_run_helper)
 
+; State for while
 (define M_state_while
   (lambda (exp state break continue return throw)
     (call/cc
@@ -315,6 +323,7 @@
                             state2))))
          (loop exp state))))))
 
+; State for try/catch/finally
 (define M_state_try-catch-finally
   (lambda (exp state break continue return throw)
     (call/cc
@@ -334,12 +343,15 @@
   (lambda (v s)
     (removevar v s)))
 
+;Adds a state to a value, returns as (v (state))
 (define add_state
   (lambda (v state)
     (cons v (cons state '()))))
 
+;Gets value from (v (state)) format
 (define get_value car)
 
+;Calculates value, returns it as (v (state)) so we can persist state changes
 (define M_value
   (lambda (exp state throw)
     (cond
@@ -358,24 +370,62 @@
       ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
-      ((eq? (operand exp) 'funcall) (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  invalid_break invalid_continue (lambda (v) (return v)) throw))
+      ((eq? (operand exp) 'funcall) ;(update_globals (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw) state))
+       (state_run_helper (func_exp exp state) (cons (bind_func_vars (func_params exp state) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))
       (else (error 'unknown exp)) 
       )
     )
   )
 
+; gets a function expression
+(define func_exp
+  (lambda (exp state)
+    (cadr (lookup (cadr exp) state))))
+
+; gets the function parameters
+(define func_params
+  (lambda (exp state)
+    (car (lookup (cadr exp) state))))
+
+;gets the input values for a funcall
+(define func_vals cddr)
+
+; Helper to call update_state and return in proper form with return value
+(define update_globals
+  (lambda (s1 s2)
+    (cons (car s1) (cons (update_state (cdr s1) s2) '()))))
+
+; Helper to update all changed globals
+(define update_state
+  (lambda (s1 s2)
+    (cond
+      ((null? s1) s2)
+      ((null? (toplayer_vars s1)) (update_state (cdr s1) s2))
+      ((not (eq? (lookup (first_topvar s1) s2) 'UNDECLARED)) (update_state (cons (cons (remaining_topvars s1) (cons (remaining_topvals s1) '())) (cdr s1)) (change_value (first_topvar s1) (first_topval s1) s2)))
+      (else (update_state (cons (cons (cdar (toplayer_vars s1)) (cons (cdadr (toplayer_vars s1)) '())) (cdr s1)) s2)))))
+
+; Gets local state
+(define get_local_state
+  (lambda (func_name state)
+    (caddr (lookup func_name state))))
+
+; Makes a state of all accessible values according to static scope rules
 (define make_static_state
   (lambda (state)
     (cons (global_state state) (cons (top_state state) '()))))
 
+;binds function parameters to values
 (define bind_func_vars
   (lambda (vars vals new_scope state throw)
     (cond
       ((and (null? vars) (null? vals)) new_scope)
       ((and (null? vars) (not (null? vals))) (error 'error "Too many input values"))
       ((and (not (null? vars)) (null? vals)) (error 'error "Not enough input values"))
-      (else (bind_func_vars (cdr vars) (cdr vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state throw)) (cadr new_scope)) '())) state throw)))))
+      (else (bind_func_vars (remaining vars) (remaining vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state throw)) (cadr new_scope)) '())) state throw)))))
+
+; helper for remaining vars and vals
+(define remaining cdr)
 
 ; evaluates boolean expressions
 (define M_boolean
