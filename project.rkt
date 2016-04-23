@@ -286,7 +286,7 @@
     
 (define M_state_class
   (lambda (exp state break continue return throw)
-    (addtotop (cadr exp) (append (state_run_helper (cadddr exp) state break continue return throw) '(())) state)))
+    (addtotop (cadr exp) (append (car (state_run_helper (cadddr exp) state break continue return throw)) '(())) state)))
 
 
 
@@ -316,7 +316,7 @@
      (lambda (return)
        (letrec ((loop (lambda (exp2 state2)
                      (cond
-                       ((null? exp2) state2 )
+                       ((null? exp2) state2)
                        ((eq? (cadar exp2) 'main) state2)
                        (else (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw))))))) (loop exp state))))))
 
@@ -382,7 +382,8 @@
       ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
-      ((eq? (operand exp) 'new) (add_state (lookup (cadr exp) state) state))
+      ((eq? (operand exp) 'dot) (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state))
+      ((eq? (operand exp) 'new) (add_state (append (lookup (cadr exp) state) (cons (cons (cadr exp) '()) '())) state))
       ((eq? (operand exp) 'funcall) ;(update_globals (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw) state))
        (state_run_helper (func_exp exp state) (cons (bind_func_vars (func_params exp state) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))
