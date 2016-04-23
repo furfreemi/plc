@@ -286,7 +286,10 @@
     
 (define M_state_class
   (lambda (exp state break continue return throw)
-    (addtotop (cadr exp) '() state)))
+    (addtotop (cadr exp) (append (state_run_helper (cadddr exp) state break continue return throw) '(())) state)))
+
+
+
 ; Runs state for funcalls
 (define M_state_funcall
   (lambda (exp state break continue return throw)
@@ -312,9 +315,10 @@
     (call/cc
      (lambda (return)
        (letrec ((loop (lambda (exp2 state2)
-                     (if (null? exp2)
-                         (cons '() (cons state2 '()))
-                         (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw)))))) (loop exp state))))))
+                     (cond
+                       ((null? exp2) state2 )
+                       ((eq? (cadar exp2) 'main) state2)
+                       (else (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw))))))) (loop exp state))))))
 
 (define run_try state_run_helper)
 (define run_finally state_run_helper)
@@ -361,14 +365,14 @@
 
 ;Calculates value, returns it as (v (state)) so we can persist state changes
 (define M_value
-  (lambda (exp state throw class instance)
+  (lambda (exp state throw)
     (cond
       ((number? exp) (add_state exp state))
       ((boolean? exp) (add_state exp state))
       ((eq? exp 'true) (add_state #t state))
       ((eq? exp 'false) (add_state #f state))
       ((bool? exp) (add_state (M_boolean exp state throw) state))
-      ((not (pair? exp)) (if (eq? (lookup exp state) 'error)
+      ((not (pair? exp)) (if (eq? (lookup exp state) 'error) ;var b = M_value
                              (error 'unknown "var unknown")  ;unknown variable: error
                              (add_state (lookup exp state) state))) ;if var value exists in state, return value
       ((eq? (operand exp) '+) (add_state (+ (op1 exp state throw) (op2 exp state throw)) state))
@@ -378,7 +382,7 @@
       ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
-      ;((eq? (operand exp) 'new) (add_state (
+      ((eq? (operand exp) 'new) (add_state (lookup (cadr exp) state) state))
       ((eq? (operand exp) 'funcall) ;(update_globals (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw) state))
        (state_run_helper (func_exp exp state) (cons (bind_func_vars (func_params exp state) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))
