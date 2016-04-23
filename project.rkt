@@ -288,8 +288,6 @@
   (lambda (exp state break continue return throw)
     (addtotop (cadr exp) (append (car (state_run_helper (cadddr exp) state break continue return throw)) '(())) state)))
 
-
-
 ; Runs state for funcalls
 (define M_state_funcall
   (lambda (exp state break continue return throw)
@@ -384,8 +382,7 @@
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) 'dot) (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state))
       ((eq? (operand exp) 'new) (add_state (append (lookup (cadr exp) state) (cons (cons (cadr exp) '()) '())) state))
-      ((eq? (operand exp) 'funcall) ;(update_globals (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw) state))
-       (state_run_helper (func_exp exp state) (cons (bind_func_vars (func_params exp state) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
+      ((eq? (operand exp) 'funcall) (state_run_helper (func_exp exp state throw) (cons (bind_func_vars (func_params exp state throw) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state exp state throw) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))
       (else (error 'unknown exp)) 
       )
@@ -394,13 +391,17 @@
 
 ; gets a function expression
 (define func_exp
-  (lambda (exp state)
-    (cadr (lookup (cadr exp) state))))
+  (lambda (exp state throw)
+    (if (list? (cadr exp))
+        (cadr (get_value (M_value (cadr exp) state throw)))
+        (cadr (lookup (cadr exp) state)))))
 
 ; gets the function parameters
 (define func_params
-  (lambda (exp state)
-    (car (lookup (cadr exp) state))))
+  (lambda (exp state throw)
+    (if (list? (cadr exp))
+        (car (get_value (M_value (cadr exp) state throw)))
+        (car (lookup (cadr exp) state)))))
 
 ;gets the input values for a funcall
 (define func_vals cddr)
@@ -421,8 +422,10 @@
 
 ; Gets local state
 (define get_local_state
-  (lambda (func_name state)
-    (caddr (lookup func_name state))))
+  (lambda (exp state throw)
+    (if (list? (cadr exp))
+        (caadr (get_value (M_value (cadr exp) state throw)))
+        (caddr (lookup (cadr exp) state)))))
 
 ; Makes a state of all accessible values according to static scope rules
 (define make_static_state
