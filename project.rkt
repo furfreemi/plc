@@ -3,7 +3,7 @@
 ;Project 3: EECS 345
 
 
-(load "functionParser.scm")
+(load "classParser.scm")
 
 ;required interpret method
 (define interpret
@@ -73,6 +73,7 @@
       (cond
         ((null? tree) (error 'error "No return"))
         ((eq? (cadar tree) 'main) (evalParseTree (remaining_exp (cadddar tree)) (M_state (first_exp (cadddar tree)) (add_scope state) invalid_break invalid_continue return invalid_throw)))
+        ((eq? (caar tree) 'class) (evalParseTree (cadddar tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw)))
         (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw)))
     )))))
   
@@ -257,6 +258,7 @@
     (letrec ((M_stateloop (lambda (exp state break continue return throw)
       (cond
         ((eq? (operand exp) 'var) (add (remaining_exp exp) state throw))
+        ((eq? (operand exp) 'class) (M_state_class exp state break continue return throw)) 
         ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) state break continue return throw))
         ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state throw) 'UNDECLARED)))
                                     (change_value (cadr exp) (op2 exp state throw) state)
@@ -279,6 +281,12 @@
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
         ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state throw))))))) (M_stateloop exp state break continue return throw))))
 
+;(define M_object
+ ; (lambda (exp state throw class instance)
+    
+(define M_state_class
+  (lambda (exp state break continue return throw)
+    (addtotop (cadr exp) '() state)))
 ; Runs state for funcalls
 (define M_state_funcall
   (lambda (exp state break continue return throw)
@@ -353,7 +361,7 @@
 
 ;Calculates value, returns it as (v (state)) so we can persist state changes
 (define M_value
-  (lambda (exp state throw)
+  (lambda (exp state throw class instance)
     (cond
       ((number? exp) (add_state exp state))
       ((boolean? exp) (add_state exp state))
@@ -370,6 +378,7 @@
       ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
+      ;((eq? (operand exp) 'new) (add_state (
       ((eq? (operand exp) 'funcall) ;(update_globals (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw) state))
        (state_run_helper (func_exp exp state) (cons (bind_func_vars (func_params exp state) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state (cadr exp) state) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))

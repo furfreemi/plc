@@ -1,11 +1,9 @@
-var x = 0;
-while (x < 10) {
-  var y = 0;
-  x = x + 1;
-  y = y - 1;
-  break;
+class A {
+  var x = 5;
+  var y = 10;
+
+  static function main() {
+    var a = new A();
+    return a.x + a.y;
+  }
 }
-if (x > 0) {
-  x = y;
-}
-return x;
