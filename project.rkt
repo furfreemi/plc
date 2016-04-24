@@ -181,6 +181,7 @@
 (define declared?
   (lambda (exp state)
     (cond
+      ((number? exp) #t)
       ((eq? (lookup exp state) 'UNDECLARED) #f)    ;simply uninitialized
       (else #t)
       )
@@ -213,10 +214,22 @@
       ((null? state) state)
       ((not (list? (car state))) state)
       ((null? (toplayer_vars state)) (pushlayer (change_value exp value (lower_layers state))))
+      ((and (list? exp) (eq? (cadr exp) 'this)) (append (cons (car state) '()) (change_value (caddr exp) value (cdr state))))
+      ((list? exp) (change_instance_value (cadr exp) (caddr exp) value state))
       ((eq? (lookup exp state) 'UNDECLARED) state)
       ((eq? exp (first_topvar state)) (build_modified_state (toplayer_vars state) (cons value (remaining_topvals state)) (lower_layers state)))
       (else (addtotop (first_topvar state) (first_topval state) (change_value exp value (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
                       )))))
+
+(define change_instance_value
+  (lambda (inst var val state)
+    (cond
+      ((null? state) (error 'error "instance variable undeclared"))
+      ((null? (toplayer_vars state)) (append (cons (cons '() (cons '() '())) '()) (change_instance_value inst var val (cdr state))))
+      ((eq? (first_topvar state) inst) (change_value var val (cons (cons (car (first_topval state)) (cadr (first_topval state)) '()) '())))
+      (else (addtotop (first_topvar state) (first_topval state) (change_value var val (append (cons (remaining_topval state) (cons (remaining_topvars state) '())) (cons (lower_layers state) '()))))))))
+      
+                                       
 
 ; runs a begin block
 (define begin_helper
@@ -260,9 +273,9 @@
         ((eq? (operand exp) 'var) (add (remaining_exp exp) state throw))
         ((eq? (operand exp) 'class) (M_state_class exp state break continue return throw)) 
         ((eq? (operand exp) 'begin) (begin_helper (remaining_exp exp) state break continue return throw))
-        ((eq? (operand exp) '=) (if (and (declared? (cadr exp) state) (not (eq? (op2 exp state throw) 'UNDECLARED)))
-                                    (change_value (cadr exp) (op2 exp state throw) state)
-                                    (error 'unknown "variable not yet declared")))
+        ((eq? (operand exp) '=) (cond
+                                  ((not (and (declared? (get_value (M_value (cadr exp) state throw)) state) (not (eq? (op2 exp state throw) 'UNDECLARED)))) (error 'unknown "variable not yet declared"))
+                                  (else (change_value (cadr exp) (op2 exp state throw) state))))
         ((eq? (operand exp) 'if) (if (M_boolean (condition exp) state throw)
                                    (M_stateloop (stmt1 exp) state break continue return throw)
                                    (if (eq? (length exp) 4)
@@ -288,10 +301,24 @@
   (lambda (exp state break continue return throw)
     (addtotop (cadr exp) (append (car (state_run_helper (cadddr exp) state break continue return throw)) '(())) state)))
 
+(define obj_func
+  (lambda (l)
+    (caddr (cadr l))))
+
+
+(define func_obj
+  (lambda (exp state)
+    (cons (lookup (cadadr exp) state) '())))
+
+
 ; Runs state for funcalls
 (define M_state_funcall
   (lambda (exp state break continue return throw)
-    (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  break continue (lambda (v) (cadr v)) throw))))
+    (if (list? (cadr exp))
+        (cadr (state_run_helper (cadr (lookup (obj_func exp) (func_obj exp state)))
+                                (cons (bind_func_vars (car (lookup (obj_func exp) (func_obj exp state))) (cddr exp) (cons '() (cons '() '()))  state throw)
+                                      state) break continue (lambda (v) (cadr v)) throw))
+        (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  break continue (lambda (v) (cadr v)) throw)))))
 
 ; Runs state for function
 (define M_state_function
@@ -314,7 +341,7 @@
      (lambda (return)
        (letrec ((loop (lambda (exp2 state2)
                      (cond
-                       ((null? exp2) state2)
+                       ((null? exp2) (cons '() (cons state2 '())))
                        ((eq? (cadar exp2) 'main) state2)
                        (else (loop (remaining_exp exp2) (M_state (first_exp exp2) state2 break continue return throw))))))) (loop exp state))))))
 
@@ -380,14 +407,32 @@
       ((eq? (operand exp) '*) (add_state (* (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
-      ((eq? (operand exp) 'dot) (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state))
+      ((eq? (operand exp) 'dot) (if (eq? (cadr exp) 'this)
+                                    (add_state (lookup (caddr exp) (cddr state)) state)
+                                    (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state)))
       ((eq? (operand exp) 'new) (add_state (append (lookup (cadr exp) state) (cons (cons (cadr exp) '()) '())) state))
-      ((eq? (operand exp) 'funcall) (state_run_helper (func_exp exp state throw) (cons (bind_func_vars (func_params exp state throw) (func_vals exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (get_local_state exp state throw) (cons (global_state state) '())))  invalid_break invalid_continue (lambda (v) (return v)) throw))
+      ((eq? (operand exp) 'funcall) (state_run_helper (func_exp exp state throw)
+                                                      (append (bind_func_vars (func_params exp state throw)
+                                                                            (func_vals exp)
+                                                                            (cons '() (cons '() '()))
+                                                                            state throw)
+                                                              (cons (get_instance_scope (cadadr exp) state)
+                                                                    (cons (get_local_state exp state throw)
+                                                                          (cons (global_state state) '()))))
+                                                      invalid_break invalid_continue (lambda (v) (return v)) throw))
       ((pair? exp) (M_value (car exp) state throw))
       (else (error 'unknown exp)) 
       )
     )
   )
+
+(define get_instance_scope
+  (lambda (inst state)
+    (cond
+      ((null? state) (error 'error "instance not found"))
+      ((null? (toplayer_vars state)) (get_instance_scope inst (cdr state)))
+      ((eq? (first_topvar state) inst) (append (car (first_topval state)) (cons (cadr (first_topval state)) '())))
+      (else (get_instance_scope inst (cons (append (cons (remaining_topvars state) '())(cons (remaining_topvals state) '())) (lower_layers state)))))))
 
 ; gets a function expression
 (define func_exp
@@ -439,7 +484,14 @@
       ((and (null? vars) (null? vals)) new_scope)
       ((and (null? vars) (not (null? vals))) (error 'error "Too many input values"))
       ((and (not (null? vars)) (null? vals)) (error 'error "Not enough input values"))
+      ;((is_object? (car vals) state throw) (bind_func_vars (remaining vars) (remaining vals) (cons (cons (car vars) (car new_scope)) (cons (cons (car vals) (cadr new_scope)) '())) state throw))
       (else (bind_func_vars (remaining vars) (remaining vals) (cons (cons (car vars) (car new_scope)) (cons (cons (get_value (M_value (car vals) state throw)) (cadr new_scope)) '())) state throw)))))
+
+(define is_object?
+  (lambda (obj state throw)
+    (if (list? (get_value (M_value obj state throw)))
+        #t
+        #f)))
 
 ; helper for remaining vars and vals
 (define remaining cdr)
