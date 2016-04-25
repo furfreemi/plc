@@ -413,7 +413,7 @@
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) 'dot) (if (eq? (cadr exp) 'this)
                                     (add_state (lookup (caddr exp) (cons (lookup (lookup (cadr exp) state) state) '())) state)
-                                    (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state)))
+                                    (add_state (lookup (caddr exp) (cons (get_value (M_value (cadr exp) state throw)) '())) state)))
       ((eq? (operand exp) 'new) (add_state (append (lookup (cadr exp) state) (cons (cons (cadr exp) '()) '())) state))
       ((eq? (operand exp) 'funcall) (keepvalueremovethis (state_run_helper (func_exp exp state throw)
                                                       (cons (set_this exp state) (cons
