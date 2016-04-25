@@ -402,7 +402,7 @@
       ((bool? exp) (add_state (M_boolean exp state throw) state))
       ((not (pair? exp)) (cond
                            ((eq? (lookup exp state) 'error) (error 'unknown "var unknown"))  ;unknown variable: error
-                           ((is_object? (lookup exp state) state throw) (add_state (lookup (lookup exp state) state) state))
+                           ((is_object? exp state throw) (add_state (lookup (lookup exp state) state) state))
                            (else (add_state (lookup exp state) state)))) ;if var value exists in state, return value
       ((eq? (operand exp) '+) (add_state (+ (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '-) (if (eq? (length exp) 3)
@@ -507,7 +507,7 @@
 
 (define is_object?
   (lambda (obj state throw)
-    (if (and (list? (get_value (M_value obj state throw))) (eq? (length (get_value (M_value obj state throw))) 4))
+    (if (and (list? (lookup obj state)) (eq? (length (lookup obj state)) 4))
         #t
         #f)))
 
