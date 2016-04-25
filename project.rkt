@@ -152,9 +152,7 @@
       (else (lookup exp (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state))))
      )
     )
-  )
-
-; gets the rightmost scope in the state
+  ); gets the rightmost scope in the state
 (define global_state
   (lambda (state)
     (if (null? (cdr state))
@@ -214,20 +212,23 @@
       ((null? state) state)
       ((not (list? (car state))) state)
       ((null? (toplayer_vars state)) (pushlayer (change_value exp value (lower_layers state))))
-      ((and (list? exp) (eq? (cadr exp) 'this)) (append (cons (car state) '()) (change_value (caddr exp) value (cdr state))))
+      ((and (list? exp) (eq? (cadr exp) 'this)) (change_instance_value (lookup (cadr exp) state) (caddr exp) value state state))
       ((list? exp) (change_instance_value (cadr exp) (caddr exp) value state))
       ((eq? (lookup exp state) 'UNDECLARED) state)
       ((eq? exp (first_topvar state)) (build_modified_state (toplayer_vars state) (cons value (remaining_topvals state)) (lower_layers state)))
       (else (addtotop (first_topvar state) (first_topval state) (change_value exp value (build_modified_state (remaining_topvars state) (remaining_topvals state) (lower_layers state)))
                       )))))
 
+(define l
+  '(((butts)(4)) ((a a1)(() ((add x)(() 1)()())))))
+
 (define change_instance_value
-  (lambda (inst var val state)
+  (lambda (inst var val state origstate)
     (cond
       ((null? state) (error 'error "instance variable undeclared"))
-      ((null? (toplayer_vars state)) (append (cons (cons '() (cons '() '())) '()) (change_instance_value inst var val (cdr state))))
-      ((eq? (first_topvar state) inst) (change_value var val (cons (cons (car (first_topval state)) (cadr (first_topval state)) '()) '())))
-      (else (addtotop (first_topvar state) (first_topval state) (change_value var val (append (cons (remaining_topval state) (cons (remaining_topvars state) '())) (cons (lower_layers state) '()))))))))
+      ((null? (toplayer_vars state)) (change_instance_value inst var val (cdr state) origstate))
+      ((eq? (first_topvar state) inst) (change_value inst (car (change_value var val (cons (cons (car (first_topval state)) (cons (cadr (first_topval state)) '())) '()))) origstate))
+      (else (change_instance_value inst var val (append (cons (cons (remaining_topvars state) (cons (remaining_topvals state) '())) '()) (lower_layers state)) origstate)))))
       
                                        
 
@@ -292,7 +293,7 @@
         ((eq? (operand exp) 'throw) (throw (push_to_end (get_value (M_value (remaining_exp exp) state throw)) state)))
         ((eq? (operand exp) 'function) (M_state_function exp state break continue return throw))
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
-        ((eq? (operand exp) 'return) (return (M_value (remaining_exp exp) state throw))))))) (M_stateloop exp state break continue return throw))))
+        ((eq? (operand exp) 'return) (return (M_value (car (remaining_exp exp)) state throw))))))) (M_stateloop exp state break continue return throw))))
 
 ;(define M_object
  ; (lambda (exp state throw class instance)
@@ -315,9 +316,11 @@
 (define M_state_funcall
   (lambda (exp state break continue return throw)
     (if (list? (cadr exp))
-        (cadr (state_run_helper (cadr (lookup (obj_func exp) (func_obj exp state)))
-                                (cons (bind_func_vars (car (lookup (obj_func exp) (func_obj exp state))) (cddr exp) (cons '() (cons '() '()))  state throw)
-                                      state) break continue (lambda (v) (cadr v)) throw))
+        (cadr (keepvalueremovethis (state_run_helper (cadr (lookup (obj_func exp) (func_obj exp state)))
+                                (cons
+                                  (set_this exp state)
+                                  (cons (bind_func_vars (car (lookup (obj_func exp) (func_obj exp state))) (cddr exp) (cons '() (cons '() '()))  state throw)
+                                      state)) break continue (lambda (v) (cadr v)) throw)))
         (cadr (state_run_helper (cadr (lookup (cadr exp) state)) (cons (bind_func_vars (car (lookup (cadr exp) state)) (cddr exp) (cons '() (cons '() '())) (make_static_state state) throw) (cons (global_state state) '()))  break continue (lambda (v) (cadr v)) throw)))))
 
 ; Runs state for function
@@ -397,9 +400,10 @@
       ((eq? exp 'true) (add_state #t state))
       ((eq? exp 'false) (add_state #f state))
       ((bool? exp) (add_state (M_boolean exp state throw) state))
-      ((not (pair? exp)) (if (eq? (lookup exp state) 'error) ;var b = M_value
-                             (error 'unknown "var unknown")  ;unknown variable: error
-                             (add_state (lookup exp state) state))) ;if var value exists in state, return value
+      ((not (pair? exp)) (cond
+                           ((eq? (lookup exp state) 'error) (error 'unknown "var unknown"))  ;unknown variable: error
+                           ((is_object? (lookup exp state) state throw) (add_state (lookup (lookup exp state) state) state))
+                           (else (add_state (lookup exp state) state)))) ;if var value exists in state, return value
       ((eq? (operand exp) '+) (add_state (+ (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '-) (if (eq? (length exp) 3)
                                   (add_state (- (op1 exp state throw) (op2 exp state throw)) state)
@@ -408,30 +412,43 @@
       ((eq? (operand exp) '/) (add_state (quotient (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) '%) (add_state (remainder (op1 exp state throw) (op2 exp state throw)) state))
       ((eq? (operand exp) 'dot) (if (eq? (cadr exp) 'this)
-                                    (add_state (lookup (caddr exp) (cddr state)) state)
+                                    (add_state (lookup (lookup (cadr exp) state) state) state)
                                     (add_state (lookup (caddr exp) (cons (lookup (cadr exp) state) '())) state)))
       ((eq? (operand exp) 'new) (add_state (append (lookup (cadr exp) state) (cons (cons (cadr exp) '()) '())) state))
-      ((eq? (operand exp) 'funcall) (state_run_helper (func_exp exp state throw)
-                                                      (append (bind_func_vars (func_params exp state throw)
+      ((eq? (operand exp) 'funcall) (keepvalueremovethis (state_run_helper (func_exp exp state throw)
+                                                      (cons (set_this exp state) (cons
+                                                       (bind_func_vars (func_params exp state throw)
                                                                             (func_vals exp)
                                                                             (cons '() (cons '() '()))
                                                                             state throw)
-                                                              (cons (get_instance_scope (cadadr exp) state)
-                                                                    (cons (get_local_state exp state throw)
-                                                                          (cons (global_state state) '()))))
-                                                      invalid_break invalid_continue (lambda (v) (return v)) throw))
+                                                              ;(cons (get_instance_scope (cadadr exp) state)
+                                                                    (cons (global_state state) '())))
+                                                      invalid_break invalid_continue (lambda (v) (return v)) throw)))
       ((pair? exp) (M_value (car exp) state throw))
-      (else (error 'unknown exp)) 
-      )
-    )
-  )
+      (else (error 'unknown exp)))))
+
+(define keepvalueremovethis
+  (lambda (valst)
+    (cons (car valst) (cons (removethis (cadr valst)) '()))))
+
+(define set_this
+  (lambda (exp state)
+    (if (list? (cadr exp))
+        (cons '(this) (cons (cons (cadadr exp) '()) '()))
+        '(()()))))
+
+(define removethis
+  (lambda (state)
+    (cond
+      ((eq? (first_topvar state) 'this) (lower_layers state))
+      (else (cons (car state) (cons (removethis (cdr state)) '()))))));(cons (append (cons (toplayer_vars state) '()) (cons (toplayer_vals state) '())) (removethis (lower_layers state))))))))
 
 (define get_instance_scope
   (lambda (inst state)
     (cond
       ((null? state) (error 'error "instance not found"))
       ((null? (toplayer_vars state)) (get_instance_scope inst (cdr state)))
-      ((eq? (first_topvar state) inst) (append (car (first_topval state)) (cons (cadr (first_topval state)) '())))
+      ((eq? (first_topvar state) inst) (cons (car (first_topval state)) (cons (cadr (first_topval state)) '())))
       (else (get_instance_scope inst (cons (append (cons (remaining_topvars state) '())(cons (remaining_topvals state) '())) (lower_layers state)))))))
 
 ; gets a function expression
@@ -489,7 +506,7 @@
 
 (define is_object?
   (lambda (obj state throw)
-    (if (list? (get_value (M_value obj state throw)))
+    (if (and (list? (get_value (M_value obj state throw))) (eq? (length (get_value (M_value obj state throw))) 4))
         #t
         #f)))
 
