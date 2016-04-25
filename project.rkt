@@ -434,13 +434,14 @@
 
 (define set_this
   (lambda (exp state)
-    (if (list? (cadr exp))
+    (if (and (list? (cadr exp)) (not (eq? (cadadr exp) 'this)))
         (cons '(this) (cons (cons (cadadr exp) '()) '()))
         '(()()))))
 
 (define removethis
   (lambda (state)
     (cond
+      ((null? (toplayer_vars state)) (removethis (cdr state)))
       ((eq? (first_topvar state) 'this) (lower_layers state))
       (else (cons (car state) (cons (removethis (cdr state)) '()))))));(cons (append (cons (toplayer_vars state) '()) (cons (toplayer_vals state) '())) (removethis (lower_layers state))))))))
 
