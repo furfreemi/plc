@@ -80,8 +80,8 @@
       (cond
         ((null? tree) state);(error 'error "No return"))
         ((eq? (cadar tree) 'main) (evalParseTree (remaining_exp (cadddar tree)) (M_state (first_exp (cadddar tree)) (add_scope state) invalid_break invalid_continue return invalid_throw)))
-        ((eq? (caar tree) 'class) (if (null? (caddar tree)) (evalParseTree (cons (cadddar tree) (cdr tree)) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw))
-                                      (evalParseTree (cons (cadddar tree) (cdr tree)) (M_state (caddar tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw) invalid_break invalid_continue return invalid_throw))))
+        ((eq? (caar tree) 'class) (if (null? (caddar tree)) (evalParseTree (cons (cadddar tree) (cdr tree)) (M_state (first_exp tree) (pushlayer state) invalid_break invalid_continue return invalid_throw))
+                                      (evalParseTree (cons (cadddar tree) (cdr tree)) (M_state (caddar tree) (M_state (first_exp tree) (pushlayer state) invalid_break invalid_continue return invalid_throw) invalid_break invalid_continue return invalid_throw))))
         (else (evalParseTree (remaining_exp tree) (M_state (first_exp tree) state invalid_break invalid_continue return invalid_throw)))
     )))))
   
@@ -304,6 +304,7 @@
         ((eq? (operand exp) 'static-function) (M_state_function exp state break continue return throw))
         ((eq? (operand exp) 'funcall) (M_state_funcall exp state break continue return throw))
         ((eq? (operand exp) 'return) (return (M_value (car (remaining_exp exp)) state throw)))
+        ((eq? (operand exp) 'extends) (addtotop 'super (lookup (cadr exp) state) state))
         (else (M_state (cdr exp) (M_state (car exp) state break continue return throw) break continue return throw)))))) (M_stateloop exp state break continue return throw))))
 
 ;(define M_object
@@ -469,14 +470,16 @@
 (define func_exp
   (lambda (exp state throw)
     (if (list? (cadr exp))
-        (cadr (get_value (M_value (cadr exp) state throw)))
+        (if (pair? (get_value (M_value (cadr exp) state throw))) (cadr (get_value (M_value (cadr exp) state throw)))
+            (get_value (M_value (cadr exp) state throw)))
         (cadr (lookup (cadr exp) state)))))
 
 ; gets the function parameters
 (define func_params
   (lambda (exp state throw)
     (if (list? (cadr exp))
-        (car (get_value (M_value (cadr exp) state throw)))
+        (if (pair? (get_value (M_value (cadr exp) state throw))) (car (get_value (M_value (cadr exp) state throw)))
+            (get_value (M_value (cadr exp) state throw)))
         (car (lookup (cadr exp) state)))))
 
 ;gets the input values for a funcall
