@@ -7,7 +7,7 @@
 
 ;required interpret method
 (define interpret
-  (lambda (filename)
+  (lambda (filename class_name)
     (returnval (evalParseTree (parser filename) new_state))))
 
 (define value car)
